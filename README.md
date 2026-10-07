@@ -20,3 +20,7 @@ Open `index.html` in a browser. No build step; fonts load from Google Fonts.
 - A. Vlasits, STAT / Scientific American (2016), on Zhuo-Hua Pan.
 - A research report on Famintzin's 1866 paper (*Mélanges Biologiques* VI, 73–93).
 - A few items from the general record (2021 Lasker Award; Chrimson, 2014), labelled "Record" in the page.
+
+## Video
+
+`video/optogenetics-15s.mp4` is a 15-second, 1080p60 motion graphic of the same story, with sound. `video/motion.html` is its source: open it for a live preview (space pauses, arrow keys step frames). `video/build.sh` re-renders it with headless Chromium, numpy and ffmpeg.
