@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Frozen Tomb</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="timeline.js"></script>
+<script src="anim.js"></script>
+<script>
+// preview mode: ?t=12.3 renders a still, ?play plays in real time
+const q=new URLSearchParams(location.search);
+window.ready.then(()=>{
+  if(q.has('play')){const t0=performance.now()-(+q.get('play')||0)*1000;(function f(){render(((performance.now()-t0)/1000)%74);requestAnimationFrame(f)})();}
+  else if(q.has('t')) render(+q.get('t'));
+});
+</script>
+</body></html>
