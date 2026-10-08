@@ -9,8 +9,12 @@
  *   const film = Film.create({W:1920, H:1080, FPS:60, DUR:10, bg:'#0a0d18'});
  *   film.scene(0, 4, (ctx, t) => { ... });          // drawn while 0 <= t < 4
  *   film.overlay((ctx, t) => { ... });              // drawn over every scene (chrome, flashes)
- *   film.cues = {hit: 2.5, pops: [...]};            // exported to cues.json for the score
+ *   film.blur = [[2.0, 2.7, 12]];                    // optional: more motion-blur sub-frames in fast moves
+ *   film.cues = {hit: 2.5, pops: [...], transitions: [[2.0, 2.7]]};   // exported to cues.json
  *   film.start(['300 40px "Spectral"', ...]);       // load fonts, then preview or await render
+ *
+ * Text drawn through T.* is logged per rendered frame (text, screen box, effective opacity), so
+ * tools/textcheck.py can measure reading time, overlaps and the end-card hold automatically.
  *
  * Helpers are on the global `M` (maths, easing, colour, glow, sims, camera) and `T` (type).
  */
@@ -99,10 +103,37 @@
     apply(ctx, c) { ctx.translate(c.ax, c.ay); ctx.rotate(c.rot || 0); ctx.scale(c.s, c.s); ctx.translate(-c.fx, -c.fy); },
     point(c, x, y) { const dx = (x - c.fx) * c.s, dy = (y - c.fy) * c.s, co = Math.cos(c.rot || 0), si = Math.sin(c.rot || 0); return { x: c.ax + dx * co - dy * si, y: c.ay + dx * si + dy * co }; },
     zoom(S, p, ease = E.inCubic) { return Math.exp(Math.log(S) * ease(clamp(p))); },
+    // Keyframed camera for one-world films (a molecule, a machine, a map): keys sorted by t, each
+    // {t, fx, fy, s, rot?, ax?, ay?}; scale interpolates in log space so zooms feel even.
+    //   const camAt = M.cam.path([{t:0, fx:960, fy:540, s:1}, {t:2, fx:1200, fy:600, s:4}], W, H);  M.cam.apply(ctx, camAt(t))
+    path(keys, W = 1920, H = 1080, ease = E.inOutCubic) {
+      return t => {
+        let i = 0; while (i < keys.length - 2 && t >= keys[i + 1].t) i++;
+        const a = keys[i], b = keys[Math.min(i + 1, keys.length - 1)], p = b === a ? 1 : ease(prog(t, a.t, b.t));
+        const g = (k, d) => lerp(a[k] ?? d, b[k] ?? d, p);
+        return { fx: g('fx', W / 2), fy: g('fy', H / 2), ax: g('ax', W / 2), ay: g('ay', H / 2), rot: g('rot', 0), s: Math.exp(lerp(Math.log(a.s ?? 1), Math.log(b.s ?? 1), p)) };
+      };
+    },
   };
+  // Light transition into the next scene. Draw it in an overlay; the incoming scene should be opaque by `at`.
+  //   mode 'bloom' (default): a local burst of light, radius capped at 0.5 x the frame width, so the frame
+  //     corners never lift into a grey veil. 'whiteout': the full frame reaches pure white for ~2 frames
+  //     and falls away fast (exponential), which reads as a camera flash rather than a grey fade.
+  function flash(ctx, t, at, x, y, o = {}) {
+    const W = o.W || ctx.canvas.width, fps = o.fps || 60, c = o.color || '#f2d36b';
+    if (o.mode === 'whiteout') {
+      const hold = 2 / fps, a = t < at ? E.inQuad(prog(t, at - .1, at)) : t < at + hold ? 1 : 1 - E.outExpo(prog(t, at + hold, at + hold + .16));
+      if (a > .003 && t > at - .1 && t < at + hold + .16) { ctx.save(); ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, ctx.canvas.height); ctx.restore(); }
+      return;
+    }
+    const up = prog(t, at - .12, at), f = t < at ? E.inQuad(up) : Math.exp(-(t - at) / .09);
+    if (t < at - .12 || f < .004) return;
+    const r = Math.min(W * .5, 120 + W * .5 * E.outCubic(up));
+    add(ctx, () => { glow(ctx, x, y, r, '#f4f7ff', .95 * f, .75); glow(ctx, x, y, r * .4, c, .7 * f, .6); });
+  }
   function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 
-  window.M = { clamp, lerp, prog, bell, E, rng, hash, solveTime, rgb, rgba, mix, mixRGB, glow, add, sim, cam, rrect };
+  window.M = { clamp, lerp, prog, bell, E, rng, hash, solveTime, rgb, rgba, mix, mixRGB, glow, add, sim, cam, rrect, flash };
 
   /* ------------------------------------------------------------------ typography */
   // Font strings are plain canvas fonts: `${style} ${weight} ${px}px ${family}`.
@@ -110,8 +141,19 @@
   // arrows (→), superscripts (⁺ ²) or most symbols: draw those (T.arrow) or the fallback font shows.
   const GLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   function setFont(ctx, f, ls = '0px') { ctx.font = f; ctx.letterSpacing = ls; }
-  function label(ctx, s, x, y, font, col, a = 1, align = 'left', ls = '0px') {
-    if (a <= 0) return; ctx.save(); ctx.globalAlpha *= a; setFont(ctx, font, ls); ctx.fillStyle = col; ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y); ctx.restore();
+  const pxOf = f => parseFloat((f.match(/(\d+(?:\.\d+)?)px/) || [0, 16])[1]);
+  // Record a text span in screen space (only during the logged sub-frame). kind: 'text' | 'number'.
+  // a = how readable it is now (0 while blurred or scrambled); vis = how visible it is (for overlaps).
+  function rec(ctx, s, x, yBase, w, px, a, kind = 'text', vis = a) {
+    if (!T._log || !s || !s.trim()) return;
+    const top = yBase - px * .75, bot = yBase + px * (kind === 'number' ? .03 : .2);   // digits have no descenders
+    const m = ctx.getTransform(), pts = [[x, top], [x + w, top], [x, bot], [x + w, bot]].map(([u, v]) => [m.a * u + m.c * v + m.e, m.b * u + m.d * v + m.f]);
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), sc = Math.hypot(m.a, m.b);
+    T._log.push({ s: s.trim(), k: kind, a: +(ctx.globalAlpha * a).toFixed(3), v: +(ctx.globalAlpha * vis).toFixed(3), px: +(px * sc).toFixed(1), b: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map(v => Math.round(v)) });
+  }
+  function label(ctx, s, x, y, font, col, a = 1, align = 'left', ls = '0px', kind = 'text') {
+    if (a <= 0) return; ctx.save(); ctx.globalAlpha *= a; setFont(ctx, font, ls); ctx.fillStyle = col; ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y);
+    const w = ctx.measureText(s).width; rec(ctx, s, align === 'right' ? x - w : align === 'center' ? x - w / 2 : x, y, w, pxOf(font), 1, kind); ctx.restore();
   }
   function arrow(ctx, x, y, w, size, col) {
     const m = y - size * .3, lw = Math.max(1.5, size * .07), hs = size * .24;
@@ -134,6 +176,7 @@
       if (t < ti && ch !== ' ') { ch = GLY[Math.floor(hash(i * 7 + 3, Math.floor(t * 36)) * GLY.length)]; col = o.scrambleColor || T.faint; }
       ctx.fillStyle = col; ctx.fillText(ch, ox + i * adv, y + dy);
     });
+    rec(ctx, chars.map(c => c.ch).join(''), ox, y + dy, tw, size, t >= t0 + chars.length * cps ? 1 : 0, 'text', 1);   // readable once fully decoded, visible while scrambling
     ctx.restore();
   }
   function layout(ctx, segs) {
@@ -156,10 +199,12 @@
     const t0 = o.t0 || 0, st = o.st ?? .06, d = o.d || .55, rise = o.rise ?? 34, blur = o.blur ?? 14;
     if (t < t0) return 0;
     const L = layout(ctx, segs), ox = o.align === 'center' ? x - L.width / 2 : o.align === 'right' ? x - L.width : x;
+    let minA = 1, maxA = 0;   // readable only when every word is sharp and opaque; visible if any word is
     L.words.forEach((wd, i) => {
-      const p = E.outCubic(prog(t, t0 + i * st, t0 + i * st + d)); if (p <= 0) return;
+      const p = E.outCubic(prog(t, t0 + i * st, t0 + i * st + d)); if (p <= 0) { minA = 0; return; }
       let a = p, dy = (1 - p) * rise, bl = (1 - p) * blur;
       if (o.out) { const q = E.inCubic(prog(t, o.out[0] + i * st * .4, o.out[0] + i * st * .4 + o.out[1])); a *= 1 - q; dy -= q * rise * .7; bl += q * blur; }
+      minA = Math.min(minA, bl > 1.5 ? a * .5 : a); maxA = Math.max(maxA, a);
       if (a <= .004) return;
       ctx.save(); ctx.globalAlpha *= a; if (bl > .4) ctx.filter = `blur(${bl.toFixed(1)}px)`;
       if (wd.arrow) { arrow(ctx, ox + wd.x, y + dy, wd.w, wd.arrow, wd.sg.c); ctx.restore(); return; }
@@ -169,6 +214,7 @@
       if (wd.sg.glow) { const g = typeof wd.sg.glow === 'function' ? wd.sg.glow(t) : wd.sg.glow; if (g && g[1] > 0) { ctx.shadowColor = rgba(g[0], g[1]); ctx.shadowBlur = g[2] || 28; } }
       ctx.fillText(wd.tk, ox + wd.x, y + dy); ctx.restore();
     });
+    if (L.words.length) rec(ctx, L.words.map(w => w.tk).join(' '), ox, y, L.width, pxOf(segs[0].f), minA, 'text', maxA);
     return L.width;
   }
   // Fixed-width digit cells so changing counters do not jitter (most display faces have proportional figures).
@@ -176,15 +222,17 @@
     ctx.save(); setFont(ctx, font); ctx.fillStyle = col; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
     const ws = [...str].map(ch => (/[0-9]/.test(ch) ? cell : ctx.measureText(ch).width + cell * .08)), tw = ws.reduce((a, b) => a + b, 0);
     let cx = align === 'right' ? x - tw : align === 'center' ? x - tw / 2 : x;
-    [...str].forEach((ch, i) => { ctx.fillText(ch, cx + ws[i] / 2, y); cx += ws[i]; }); ctx.restore(); return tw;
+    const x0 = cx; [...str].forEach((ch, i) => { ctx.fillText(ch, cx + ws[i] / 2, y); cx += ws[i]; }); rec(ctx, str, x0, y, tw, pxOf(font), 1, 'number'); ctx.restore(); return tw;
   }
   // Base text with a drawn superscript, e.g. T.sup(ctx, 'Ca', '2+', x, y, col, 16).
   function sup(ctx, base, s, x, y, col, size = 16, family = T.MONO) {
     ctx.save(); setFont(ctx, `500 ${size}px ${family}`); ctx.fillStyle = col; ctx.fillText(base, x, y); const w = ctx.measureText(base).width;
-    setFont(ctx, `500 ${size * .68}px ${family}`); ctx.fillText(s, x + w + 1, y - size * .42); ctx.restore();
+    setFont(ctx, `500 ${size * .68}px ${family}`); ctx.fillText(s, x + w + 1, y - size * .42); rec(ctx, base + s, x, y, w + ctx.measureText(s).width, size, 1); ctx.restore();
   }
   // Callout: anchor dot + ripple, elbow leader drawn on, then a mono title and an optional sans subline.
   // p is 0→1 progress (e.g. prog(t, t0, t0+.7)). o.left puts the label to the left of its elbow.
+  // The label text only appears from p ≈ 0.45 and is fully sharp at p = 1: schedule any fade-out at
+  // least (words / 4.5 + 0.4) s after p reaches 1, or nobody can read it.
   function callout(ctx, ax, ay, lx, ly, p, title, sub, col, o = {}) {
     if (p <= 0) return; ctx.save(); ctx.globalAlpha *= o.a ?? 1;
     const ex = lx + (o.left ? 18 : -18), pts = [[ax, ay], [ex, ly], [lx + (o.left ? 6 : -6), ly]];
@@ -203,7 +251,7 @@
   }
   // T.DISP/BODY/MONO and T.fg/muted/faint are defaults; a film overrides them to match its source.
   window.T = { DISP: 'Georgia, serif', BODY: 'system-ui, sans-serif', MONO: 'ui-monospace, monospace', fg: '#e8ebf5', muted: '#9aa3bf', faint: '#6a7393',
-    label, arrow, eyebrow, line, layout, tabular, sup, callout, setFont };
+    label, arrow, eyebrow, line, layout, tabular, sup, callout, setFont, rec, _log: null };
 
   /* ------------------------------------------------------------------ film */
   window.Film = {
@@ -232,21 +280,30 @@
       }
       function post(ctx, frame) {
         if (film.grain > 0) { ctx.save(); ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = film.grain; ctx.drawImage(grain[frame % grain.length], 0, 0, film.W, film.H); ctx.restore(); }
-        if (film.vignette > 0) { const v = ctx.createRadialGradient(film.W / 2, film.H / 2, film.H * .45, film.W / 2, film.H / 2, film.H * 1.05); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(0,0,0,${film.vignette})`); ctx.fillStyle = v; ctx.fillRect(0, 0, film.W, film.H); }
+        const R = Math.hypot(film.W, film.H) / 2;   // diagonal-based so portrait frames vignette evenly
+        if (film.vignette > 0) { const v = ctx.createRadialGradient(film.W / 2, film.H / 2, R * .4, film.W / 2, film.H / 2, R * .95); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(0,0,0,${film.vignette})`); ctx.fillStyle = v; ctx.fillRect(0, 0, film.W, film.H); }
       }
       // Motion blur: average `S` sub-frames spread over `shutter` of a frame (0.5 = 180° shutter).
+      // film.blur = [[t0, t1, S2], ...] raises S inside fast moves: 4 sub-frames strobe into visible
+      // copies on thin lines, stars and text during quick zooms and pans; 12–16 make a smooth streak.
+      film.blur = [];
+      film.subAt = (t, S) => film.blur.reduce((m, [a, b, s]) => (t >= a - .05 && t <= b + .05 ? Math.max(m, s) : m), S);
       film.renderFrame = (i, S = 4, shutter = .5) => {
+        S = S > 1 ? film.subAt(i / film.FPS, S) : 1; const mid = Math.floor(S / 2); let log = [];
         for (let k = 0; k < S; k++) {
           const tk = clamp(i / film.FPS + (S > 1 ? ((k + .5) / S - .5) * shutter / film.FPS : 0), 0, film.DUR - 1e-4);
-          drawScene(sctx, tk); actx.globalAlpha = 1 / (k + 1); actx.globalCompositeOperation = 'source-over'; actx.drawImage(sub, 0, 0);
+          T._log = k === mid ? log : null; drawScene(sctx, tk); T._log = null;
+          actx.globalAlpha = 1 / (k + 1); actx.globalCompositeOperation = 'source-over'; actx.drawImage(sub, 0, 0);
         }
-        actx.globalAlpha = 1; out.globalAlpha = 1; out.drawImage(acc, 0, 0); post(out, i);
+        actx.globalAlpha = 1; out.globalAlpha = 1; out.drawImage(acc, 0, 0); post(out, i); film.lastText = log;
       };
       film.drawAt = t => { drawScene(out, t); post(out, Math.floor(t * film.FPS)); };
 
       film.start = fontSpecs => {
         film.ready = (async () => { await Promise.all((fontSpecs || []).map(s => document.fonts.load(s, 'Aa1’–·'))); await document.fonts.ready; })();
-        window.FILM = { W: film.W, H: film.H, FPS: film.FPS, DUR: film.DUR, renderFrame: film.renderFrame, drawAt: film.drawAt, get CUES() { return Object.assign({ dur: film.DUR, fps: film.FPS }, film.cues); }, ready: film.ready };
+        window.FILM = { W: film.W, H: film.H, FPS: film.FPS, DUR: film.DUR, renderFrame: film.renderFrame, drawAt: film.drawAt, text: () => film.lastText || [],
+          get CUES() { return Object.assign({ dur: film.DUR, fps: film.FPS, W: film.W, H: film.H, blur: film.blur }, film.cues); }, ready: film.ready };
+        document.documentElement.style.setProperty('--ar', film.W / film.H);   // preview shell follows the film's aspect ratio
         if (/[?&]render/.test(location.search)) { document.body.classList.add('render'); return; }
         // Live preview: space = play/pause, ←/→ = ±1 frame (shift: ±0.5 s), scrubber and timecode if present.
         const pp = document.getElementById('pp'), sc = document.getElementById('scrub'), tc = document.getElementById('tc');

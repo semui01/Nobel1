@@ -1,50 +1,63 @@
 # Sound design for motion videos
 
 Sound is synthesised in `score.py` with the instruments in `sound.py`, and every time comes from
-`cues.json`, which the film exports from `film.cues`. Nothing is hand-timed, so changing the
-film's timing table moves the sound with it.
+`cues.json`, which the film exports from `film.cues`. Nothing is hand-timed, so retiming the film
+moves the sound with it. `node render.mjs --cues-only --frames <dir>` writes `cues.json` without
+rendering, so you can work on the score early.
 
 ## Layers
 
 | Layer | Instrument | What triggers it | Typical gain |
 |---|---|---|---|
 | Bed | `Score.chord` (pad with brightness automation) | one chord per scene, crossfading at cuts | 0.06–0.07 per note |
-| Data points | `mallet`, pitch from a pentatonic scale, pan from x | each item popping in | 0.07 (minor), 0.13 (milestone) |
+| Data points | `mallet`, pitch from a pentatonic scale, pan from x | each item popping in | 0.07 minor, 0.13 milestone |
 | Reveals | `bell` (ratio 2.0 glassy, 3.5 metallic) | a light turning on, a discovery, a title | 0.08–0.17 |
-| Clicks | `tick`, `pop` | pulses, UI blips, spikes, switches | 0.04–0.35 |
+| Clicks | `tick`, `pop` | pulses, UI blips, spikes, switches, letters pairing | 0.04–0.35 |
 | Motion | `whoosh`, `whip` | zooms (rising), pull-outs (falling), whip pans | 0.22–0.3 |
 | Build | `riser` | the ~0.9 s before a big cut | 0.3 |
-| Impact | `boom` | landing a zoom, the end card | 0.15–0.55 |
+| Impact | `boom` (low thump + 1–4 kHz click) | landing a zoom, the end card | 0.15–0.55 |
 
 Design rules:
 - **One sound per kind of event**, consistent through the film, so the ear learns the vocabulary.
-  When the picture says something stops (silencing, a pause), make the sound stop too: absence is
-  a strong cue.
-- **One key.** Pentatonic scales for event melodies keep any combination consonant. Move the bed
-  through related chords per scene (Dm → B♭ → Gm → A in the Nobel film) and **resolve** on the end
-  card (D major), with a bell arpeggio timed to the title words.
-- Automate the pad's brightness with the story: closed at the start, open as things build, dip
+  When the picture says something stops (silencing, a failed match), make the sound stop or turn
+  dull: absence and contrast are strong cues.
+- **One key.** Pentatonic scales keep event melodies consonant. Move the bed through related chords
+  per scene (Dm → B♭ → Gm → A in the Nobel film) and **resolve** on the end card, with a bell
+  arpeggio timed to the title words.
+- Automate the pad's brightness with the story: closed at the start, open as things build, dimmed
   while something is silenced, brightest at the reveal.
-- Keep low notes below ~100 Hz quieter (the `chord` helper does) and high-pass the master (done)
-  or the bed turns to mud.
+
+## Low end and venues
+
+Laptop, TV, lecture-room and phone speakers reproduce little or nothing below 60–150 Hz; energy down
+there only eats headroom (and makes room PAs rumble). Tested films that put 30–50% of their energy
+below 60–120 Hz lost their impacts on small speakers.
+- Voice pad roots at E1–A1 only quietly (`chord` scales notes below 100 Hz to 0.35); prefer roots in
+  octave 2. The master high-passes at 40 Hz.
+- `boom` carries a 1–4 kHz click layer so impacts still land without sub-bass.
+- **Social video:** `Score(dur, profile='phone')` high-passes at 110 Hz and lifts presence around
+  3 kHz; build with `LUFS=-14`. check.py warns when more than 35% of the energy sits below 120 Hz
+  (phone) or 25% below 60 Hz (other venues).
 
 ## Mix and loudness
 
 `Score.write` normalises, soft-clips gently (`drive` 1.1) and fades the tail; `build.sh` then
-loudness-normalises in two passes to −16 LUFS integrated, −1.5 dBTP (streaming-safe). Events
-should rise clearly above the bed: if the bed is louder than ~−18 dB RMS on its own, lower the
-chord gains.
+loudness-normalises in two passes (−16 LUFS by default, −1.5 dBTP). Events should rise clearly above
+the bed. A loudness range (LRA) under ~2.5 LU means the mix is squashed: lower the bed or raise the
+events rather than adding drive.
 
 ## Verifying without hearing it
 
-You cannot listen, so measure:
-- `tools/check.py film.mp4 frames/cues.json --sync <cue list>` reports loudness and the median
-  offset between cue times and audio transients (aim for under ±15 ms).
-- A spectrogram shows whether events stand out from the bed:
-  `ffmpeg -i film.mp4 -lavfi "showspectrumpic=s=1800x600:legend=1:scale=log:fscale=log:stop=12000" spec.png`
-  Look for distinct marks at each event time above the pad's horizontal bands.
-- Loudness range (LRA in the loudnorm output) below ~3 LU means the mix is over-compressed; raise
-  event gains or lower the bed rather than adding drive.
+`tools/check.py` (run by `build.sh`) reports loudness and LRA, low-frequency energy for the venue,
+and sync, and writes `<film>-spec.png`.
+- **Sync** finds the onset of high-frequency energy near each cue (the search window never reaches a
+  neighbouring cue) and reports the median offset per cue list. Sounds are placed from the same cue
+  times, so only a *consistent* offset across several cues is an error (a wrong fps, a shifted list).
+  Soft or tonal sounds (pads, slow bells) have no sharp onset and show scattered or no readings;
+  that is expected.
+- **Spectrogram:** each event should show as a distinct mark above the pad's horizontal bands. A
+  steady band can be coincident harmonics of the chord (D5 is the 9th harmonic of C2, the 6th of G2,
+  the 3rd of G3), not a stray tone.
 
 Then tell the user the mix was checked by measurement only and that they should listen before
 publishing.

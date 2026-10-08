@@ -118,13 +118,15 @@ def riser(d=.9, f0=250, ratio=30):
     return y / np.abs(y).max() * np.linspace(0, 1, len(y)) ** 3
 
 
-def boom(d=1.6, f0=72, f1=34, tau=.5):
-    """Sub impact with a pitch drop and a soft transient. Scene changes, reveals, the final card."""
+def boom(d=1.6, f0=80, f1=42, tau=.5, click=.35):
+    """Impact: a pitch-dropping low thump plus a 1–4 kHz click layer, so it still lands on laptop and
+    phone speakers that cannot reproduce the low part. Scene changes, reveals, the final card."""
     t = tt(d)
     f = f1 + (f0 - f1) * np.exp(-t / .18)
     s = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / tau) * np.minimum(1, t / .004)
     hit = lowpass(noise(d), 1800) * np.exp(-t / .05)
-    return s + .35 * hit / (np.abs(hit).max() + 1e-9)
+    ck = fft_filter(noise(d), lambda fr: np.exp(-(np.log(fr / 2200) / .5) ** 2)) * np.exp(-t / .012)
+    return s + .35 * hit / (np.abs(hit).max() + 1e-9) + click * ck / (np.abs(ck).max() + 1e-9)
 
 
 def curve(points):
@@ -149,9 +151,14 @@ def pad_note(f, t0, t1, bright, att=.35, rel=.6, gain=1.0):
 
 
 class Score:
-    def __init__(self, dur, seed=1):
+    """profile: 'speakers' (laptops, TVs, projection: master high-pass 40 Hz) or 'phone'
+    (Reels/Shorts/TikTok: high-pass 110 Hz and a gentle presence lift, since phone speakers play
+    nothing below ~150 Hz; pair it with LUFS=-14 in build.sh)."""
+
+    def __init__(self, dur, seed=1, profile='speakers'):
         global RNG
         RNG = np.random.default_rng(seed)
+        self.profile = profile
         self.dur, self.n = dur, int(SR * dur)
         self.dry = np.zeros((2, self.n))
         self.wet = np.zeros((2, self.n))
@@ -172,7 +179,7 @@ class Score:
     def chord(self, notes, t0, t1, bright, gain=.06, att=.35, rel=.5, spread=.35, rev=.25):
         for nt in notes:
             f = hz(nt)
-            self.add(pad_note(f, t0, t1, bright, att, rel, .7 if f < 100 else 1), t0, gain, RNG.uniform(-spread, spread), rev)
+            self.add(pad_note(f, t0, t1, bright, att, rel, .35 if f < 100 else 1), t0, gain, RNG.uniform(-spread, spread), rev)   # low roots mostly eat headroom
 
     def mixdown(self, rev_mix=.55, drive=1.1, tail=.45):
         t = tt(2.6)
@@ -183,7 +190,10 @@ class Score:
         L = 1 << int(np.ceil(np.log2(self.n + ir.shape[1])))
         rev = np.vstack([np.fft.irfft(np.fft.rfft(self.wet[c], L) * np.fft.rfft(ir[c], L), L)[:self.n] for c in range(2)])
         mix = self.dry + rev_mix * rev
-        mix = np.vstack([highpass(mix[0], 28, 2), highpass(mix[1], 28, 2)])
+        hpf = 110 if self.profile == 'phone' else 40
+        mix = np.vstack([highpass(mix[c], hpf, 2) for c in range(2)])
+        if self.profile == 'phone':
+            mix = np.vstack([mix[c] + .35 * fft_filter(mix[c], lambda fr: np.exp(-(np.log(fr / 3000) / .6) ** 2)) for c in range(2)])
         mix /= np.abs(mix).max() + 1e-9
         mix = np.tanh(mix * drive) / np.tanh(drive)       # gentle soft clip; ffmpeg loudnorm sets final level
         fade = np.ones(self.n)

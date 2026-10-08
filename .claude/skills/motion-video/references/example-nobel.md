@@ -30,6 +30,14 @@ A year rail along the bottom tracked each scene's place in the 160-year timeline
   khaki flash, a fibre running through a headline, a hard background edge in a whip pan, a cluttered
   crossfade in the zoom, and smeared rail labels.
 
+## What the checks say about it now
+
+Run through today's `tools/check.py`, the film passes sync (spike sounds +3.7 ms from their frames)
+but is flagged for a **grey wash at 12.48–12.70 s**: the flash into the end card was a full-frame
+bloom at partial opacity, which lifts the corners to ~34% luma while colour drains. That measurement
+is where `M.flash` and its two modes came from. It also has 27% of its energy below 60 Hz, more than
+small speakers can use.
+
 ## Numbers
 
 1920×1080, 60 fps, 900 frames, 4 sub-frames: 135 s to render on 4 cores; 21.6 MB at CRF 15;
