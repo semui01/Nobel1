@@ -1,0 +1,19 @@
+{
+  "skill_name": "motion-video",
+  "evals": [
+    {
+      "id": 1,
+      "name": "crispr-explainer-topic-only",
+      "prompt": "Make a 12-second motion graphics video that explains how CRISPR-Cas9 edits a gene: the guide RNA finds the matching DNA, Cas9 cuts both strands, and the cell repairs the break. It's for the opening of a biology lecture, so make it look polished. Don't wait for me to approve a storyboard, just go.",
+      "expected_output": "A 12 s 1920x1080 MP4 with sound; scenes for guide RNA search, matching, double-strand cut and repair; accurate biology; legible text; content-driven transitions; end card; source project kept.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "voyager-vertical-from-source",
+      "prompt": "Turn the Wikipedia article on the Voyager 1 probe (https://en.wikipedia.org/wiki/Voyager_1) into a 10-second vertical (9:16) teaser for Instagram Reels, with sound. Skip the storyboard check-in, I trust you.",
+      "expected_output": "A 10 s 1080x1920 MP4 with sound; facts traceable to the article; layout designed for vertical with text clear of app UI zones; end card.",
+      "files": []
+    }
+  ]
+}

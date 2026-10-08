@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Film</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+/* Preview shell only. The film is one canvas; ?render switches to frame-by-frame capture. */
+html,body{margin:0;height:100%;background:#05070d;color:#9aa3bf;font:13px/1.4 ui-monospace,monospace}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+canvas{width:min(96vw,calc((100vh - 64px)*16/9));aspect-ratio:16/9;display:block}
+.ctl{display:flex;gap:12px;align-items:center;width:min(96vw,calc((100vh - 64px)*16/9))}
+.ctl input{flex:1}
+.ctl button{font:inherit;color:#e8ebf5;background:#11162a;border:1px solid #262f4d;border-radius:6px;padding:4px 10px;cursor:pointer}
+body.render{display:block} body.render .ctl{display:none} body.render canvas{width:auto;aspect-ratio:auto}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Motion graphic"></canvas>
+<div class="ctl"><button id="pp">Pause</button><input id="scrub" type="range" min="0" max="10" step="0.001" value="0"><span id="tc">0.00 s</span></div>
+<script src="engine.js"></script>
+<script>
+/* STARTER FILM: a 9-second template that shows the core patterns. Replace the scenes, keep the structure:
+   palette + type tokens → master timing table → precomputed data/sims → scenes → overlays → cues → start. */
+(() => {
+'use strict';
+const {clamp, lerp, prog, bell, E, hash, rgba, mix, glow, add, sim, cam, rrect, solveTime} = M;
+
+/* 1. Palette and type: copy these from the source (CSS custom properties, brand guide, site screenshot). */
+const C = {bg:'#0a0d18', surface:'#11162a', line:'#262f4d', fg:'#e8ebf5', muted:'#9aa3bf', faint:'#6a7393',
+  accent:'#3d9bff', warm:'#ffb02e', good:'#7bd86f', gold:'#f2d36b'};
+Object.assign(T, {DISP:'"Spectral", Georgia, serif', BODY:'"IBM Plex Sans", system-ui, sans-serif', MONO:'"IBM Plex Mono", ui-monospace, monospace', fg:C.fg, muted:C.muted, faint:C.faint});
+const W = 1920, H = 1080;
+const film = Film.create({W, H, FPS:60, DUR:9, bg:C.bg});
+
+/* 2. Master timing table: every scene boundary and beat lives here, so retiming is one edit. */
+const TM = {lightOn:.1, titleOut:2.5, whip:[2.75,3.2], bars0:3.45, bars1:4.6, callout:4.9, flash:6.35, fin:6.4};
+
+/* 3. Precomputed state. Simulations run once at load; draw functions only sample them. */
+const L1 = {x:1380, y:520};
+const light = t => E.outCubic(prog(t, TM.lightOn, .9));
+const swarm = sim({n:120, dur:3.4, seed:11, wrap:{x:[-40,W+40], y:[-40,H+40]},
+  init:(i, r) => ({x:r()*W, y:r()*H, a:r()*6.28, v:40+r()*60, z:.5+r()*.6}),
+  step:(p, t, dt, r) => {
+    const target = Math.atan2(L1.y-p.y, L1.x-p.x); let da = ((target-p.a+Math.PI*3)%(Math.PI*2))-Math.PI;
+    p.a += da*2.4*dt*light(t) + (r()-.5)*.25; p.x += Math.cos(p.a)*p.v*dt; p.y += Math.sin(p.a)*p.v*dt;
+    if(p.x<-40)p.x=W+40; if(p.x>W+40)p.x=-40; if(p.y<-40)p.y=H+40; if(p.y>H+40)p.y=-40;
+  }});
+const DATA = [['2019',12],['2020',19],['2021',27],['2022',41],['2023',58],['2024',83]];   // placeholder numbers
+const BX0 = 620, BX1 = 1700, BY = 860, BH = 520, bw = (BX1-BX0)/DATA.length;
+const barT = i => TM.bars0 + (TM.bars1-TM.bars0)*i/(DATA.length-1);                     // when each bar lands
+
+/* 4. Scenes. Each draws in absolute film time t; it may start before/after its neighbours for crossfades. */
+film.scene(0, 3.25, (ctx, t) => {
+  const pan = E.inOutCubic(prog(t, ...TM.whip)) * W;                 // whip pan: content leaves left...
+  ctx.globalAlpha = 1 - E.inCubic(prog(t, ...TM.whip));              // ...and fades, so no hard edge shows
+  ctx.translate(-pan, 0);
+  const I = light(t);
+  add(ctx, () => { glow(ctx, L1.x, L1.y, 700*I, C.accent, .12*I, .5); glow(ctx, L1.x, L1.y, 300*I, C.accent, .45*I); glow(ctx, L1.x, L1.y, 14, '#ffffff', I) });
+  for (let i = 0; i < swarm.n; i++) {
+    const p = swarm.at(i, t);
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a); ctx.globalAlpha *= .35 + .6*(p.z-.5)/.6;
+    ctx.fillStyle = rgba(C.good, .9); ctx.beginPath(); ctx.ellipse(0, 0, 9*p.z, 6*p.z, 0, 0, 7); ctx.fill(); ctx.restore();
+  }
+  const sg = ctx.createLinearGradient(0,0,1200,0); sg.addColorStop(0, rgba(C.bg,.85)); sg.addColorStop(1, rgba(C.bg,0)); ctx.fillStyle = sg; ctx.fillRect(0,330,1200,320);   // legibility scrim
+  T.eyebrow(ctx, [{s:'CHAPTER 1', c:C.accent}, {s:' · YOUR TOPIC', c:C.muted}], 140, 410, t, .3, {out:[TM.titleOut,.3]});
+  T.line(ctx, [{s:'A headline of six ', f:`300 92px ${T.DISP}`, c:C.fg}, {s:'words.', f:`italic 300 92px ${T.DISP}`, c:C.accent, glow:[C.accent,.5,30]}], 136, 515, t, {t0:.45, st:.07, out:[TM.titleOut,.35]});
+  T.line(ctx, [{s:'One supporting sentence in the body face.', f:`400 30px ${T.BODY}`, c:C.muted}], 140, 575, t, {t0:.75, st:.025, rise:18, out:[TM.titleOut,.3]});
+});
+
+film.scene(TM.whip[0], TM.flash + .3, (ctx, t) => {
+  const wp = prog(t, ...TM.whip), ox = W * (1 - E.inOutCubic(wp));     // enters from the right, same easing
+  ctx.globalAlpha = E.outCubic(wp) * (1 - prog(t, TM.flash, TM.flash + .1)); ctx.translate(ox, 0);
+  T.eyebrow(ctx, [{s:'2019–2024', c:C.accent}, {s:' · PLACEHOLDER DATA', c:C.muted}], 140, 130, t, TM.whip[0] + .2);
+  T.line(ctx, [{s:'Numbers that ', f:`300 66px ${T.DISP}`, c:C.fg}, {s:'climb.', f:`italic 300 66px ${T.DISP}`, c:C.warm, glow:[C.warm,.45,26]}], 136, 210, t, {t0:TM.whip[0] + .3, st:.06});
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(BX0-20, BY); ctx.lineTo(BX1, BY); ctx.stroke();
+  let shown = 0;
+  DATA.forEach(([yr, v], i) => {
+    const pq = prog(t, barT(i), barT(i) + .45); if (pq <= 0) return; const q = E.outBack(pq);   // gate on prog, not the eased value (outBack(0) is not exactly 0) shown = Math.max(shown, v * clamp(q));
+    const h = BH * v / 83 * q, x = BX0 + i*bw + bw*.18, w = bw*.64;
+    const g = ctx.createLinearGradient(0, BY-h, 0, BY); g.addColorStop(0, C.warm); g.addColorStop(1, rgba(C.warm, .25));
+    ctx.fillStyle = g; rrect(ctx, x, BY-h, w, h, 6); ctx.fill();
+    add(ctx, () => glow(ctx, x + w/2, BY-h, 60, C.warm, .5*(1-prog(t, barT(i), barT(i)+.5))));
+    T.label(ctx, yr, x + w/2, BY + 36, `400 18px ${T.MONO}`, C.muted, 1, 'center');
+    T.label(ctx, String(v), x + w/2, BY - h - 16, `500 22px ${T.BODY}`, C.fg, clamp(q), 'center');
+  });
+  ctx.save(); ctx.globalAlpha *= prog(t, TM.bars0 - .1, TM.bars0 + .2); T.tabular(ctx, String(Math.round(shown)), 140, 520, `300 150px ${T.DISP}`, C.fg, 76); ctx.restore();   // counter with fixed digit cells
+  T.label(ctx, 'units, placeholder', 144, 560, `400 22px ${T.BODY}`, C.muted, prog(t, TM.bars0, TM.bars0 + .3));
+  const last = DATA.length - 1, lx = BX0 + last*bw + bw/2;
+  T.callout(ctx, lx, BY - BH - 4, 1380, 300, prog(t, TM.callout, TM.callout + .7), 'LARGEST JUMP', 'say why it matters', C.warm, {left:true});
+});
+
+film.scene(TM.flash - .02, 9, (ctx, t) => {
+  ctx.globalAlpha = E.outCubic(prog(t, TM.flash - .02, TM.flash + .1)); ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  add(ctx, () => { glow(ctx, 1640, 520, 520, C.accent, .2, .5); glow(ctx, 1640, 520, 12, '#ffffff', .9) });
+  const push = 1 + .02*E.outCubic(prog(t, TM.fin, 9)); ctx.translate(140, 600); ctx.scale(push, push); ctx.translate(-140, -600);   // slow push-in on the end card
+  T.eyebrow(ctx, [{s:'YOUR SOURCE · 2026', c:C.gold}], 140, 330, t, TM.fin + .12, {size:22, cps:.012});
+  T.line(ctx, [{s:'The title of ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'your story,', f:`italic 300 112px ${T.DISP}`, c:C.good}], 134, 470, t, {t0:TM.fin + .22, st:.08, rise:44, blur:18});
+  T.line(ctx, [{s:'set as the ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'end card.', f:`italic 300 112px ${T.DISP}`, c:C.accent}], 134, 592, t, {t0:TM.fin + .42, st:.08, rise:44, blur:18});
+  const dl = E.inOutCubic(prog(t, TM.fin + 1.0, TM.fin + 1.5)); ctx.fillStyle = rgba(C.gold, .8); ctx.fillRect(140, 768, 1640*dl, 1.5);
+  const uq = E.outCubic(prog(t, TM.fin + 1.2, TM.fin + 1.7));
+  if (uq > 0) { T.label(ctx, 'example.org/your-link', 1732, 846, `600 36px ${T.BODY}`, C.fg, uq, 'right'); T.arrow(ctx, 1742, 846, 38, 36, rgba(C.accent, uq)); }
+});
+
+/* 5. Overlays: persistent chrome and transitions that span scenes. */
+film.overlay((ctx, t) => {
+  T.label(ctx, 'Brand', 140, 70, `italic 300 28px ${T.DISP}`, C.fg, .85 * (1 - prog(t, TM.flash - .1, TM.flash)));
+  // Flash into the end card: short, near-white, coloured only at the core (a coloured wash at partial alpha goes muddy).
+  const fu = prog(t, TM.flash - .14, TM.flash), fd = 1 - E.outQuad(prog(t, TM.flash, TM.flash + .26)), f = t < TM.flash ? E.inQuad(fu) : fd;
+  if (t > TM.flash - .14 && t < TM.flash + .26) add(ctx, () => { const r = 200 + 2400*E.outCubic(fu); glow(ctx, 1640, 520, r, '#f4f7ff', .98*f, .82); glow(ctx, 1640, 520, r*.35, C.gold, .6*f, .6) });
+});
+
+/* 6. Cues for the score: every audible event, in film seconds. score.py reads these from cues.json. */
+film.cues = {lightOn:TM.lightOn, titleOut:TM.titleOut, whips:[TM.whip], pops:DATA.map((_, i) => barT(i)), callout:TM.callout, flash:TM.flash, fin:TM.fin, url:TM.fin + 1.2};
+
+film.start([`300 40px ${T.DISP}`, `italic 300 40px ${T.DISP}`, `400 20px ${T.BODY}`, `500 20px ${T.BODY}`, `600 20px ${T.BODY}`, `500 20px ${T.MONO}`, `400 20px ${T.MONO}`]);
+})();
+</script>
+</body>
+</html>
