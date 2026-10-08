@@ -42,6 +42,10 @@
   function rng(seed) { let a = seed | 0; return function () { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
   // Stateless hash in [0,1): use inside draw functions for per-item "randomness".
   function hash(a, b = 0) { let h = Math.imul((a | 0) ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul((b | 0) + 0x632be5ab, 0xc2b2ae35); h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; return (h >>> 0) / 4294967296; }
+  // The output frame's own time. Motion blur draws each frame several times at slightly different t;
+  // anything discrete (a counter's digits, a decoded string, which label is shown) must be computed
+  // from frameT(t), or the sub-frames average into ghosted, overlapping glyphs.
+  const frameT = t => (window.T && T._frameT != null ? T._frameT : t);
   // Binary-search the time at which a monotonic function f(t) reaches value v (e.g. when a playhead passes an item).
   function solveTime(f, v, a, b) { for (let k = 0; k < 40; k++) { const m = (a + b) / 2; if (f(m) < v) a = m; else b = m; } return b; }
 
@@ -116,24 +120,31 @@
     },
   };
   // Light transition into the next scene. Draw it in an overlay; the incoming scene should be opaque by `at`.
-  //   mode 'bloom' (default): a local burst of light, radius capped at 0.5 x the frame width, so the frame
-  //     corners never lift into a grey veil. 'whiteout': the full frame reaches pure white for ~2 frames
-  //     and falls away fast (exponential), which reads as a camera flash rather than a grey fade.
+  //   mode 'bloom' (default): a local burst of light tinted with o.color, radius o.r (default 0.32 x frame
+  //     width), smooth falloff with no visible disc edge; the frame corners never lift into a grey veil.
+  //   mode 'whiteout': the full frame reaches pure white for ~2 frames and falls away fast (exponential),
+  //     which reads as a camera flash rather than a grey fade.
+  //   o.strength (0–1, default .9) scales the peak.
   function flash(ctx, t, at, x, y, o = {}) {
-    const W = o.W || ctx.canvas.width, fps = o.fps || 60, c = o.color || '#f2d36b';
+    const W = ctx.canvas.width, fps = o.fps || 60, c = o.color || '#f2d36b', k = o.strength ?? .9;
     if (o.mode === 'whiteout') {
       const hold = 2 / fps, a = t < at ? E.inQuad(prog(t, at - .1, at)) : t < at + hold ? 1 : 1 - E.outExpo(prog(t, at + hold, at + hold + .16));
       if (a > .003 && t > at - .1 && t < at + hold + .16) { ctx.save(); ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, ctx.canvas.height); ctx.restore(); }
       return;
     }
-    const up = prog(t, at - .12, at), f = t < at ? E.inQuad(up) : Math.exp(-(t - at) / .09);
+    const up = prog(t, at - .12, at), f = (t < at ? E.inQuad(up) : Math.exp(-(t - at) / .09)) * k;
     if (t < at - .12 || f < .004) return;
-    const r = Math.min(W * .5, 120 + W * .5 * E.outCubic(up));
-    add(ctx, () => { glow(ctx, x, y, r, '#f4f7ff', .95 * f, .75); glow(ctx, x, y, r * .4, c, .7 * f, .6); });
+    const R = o.r ?? W * .32, r = R * (.35 + .65 * E.outCubic(up)), halo = mixRGB(c, '#ffffff', .45);
+    add(ctx, () => {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      [[0, 1], [.1, .8], [.25, .5], [.45, .22], [.7, .06], [1, 0]].forEach(([s, a]) => g.addColorStop(s, rgba(halo, a * f)));   // gaussian-like: no disc edge
+      ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      glow(ctx, x, y, r * .35, c, .6 * f, .6);
+    });
   }
   function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 
-  window.M = { clamp, lerp, prog, bell, E, rng, hash, solveTime, rgb, rgba, mix, mixRGB, glow, add, sim, cam, rrect, flash };
+  window.M = { clamp, lerp, prog, bell, E, rng, hash, solveTime, frameT, rgb, rgba, mix, mixRGB, glow, add, sim, cam, rrect, flash };
 
   /* ------------------------------------------------------------------ typography */
   // Font strings are plain canvas fonts: `${style} ${weight} ${px}px ${family}`.
@@ -163,7 +174,10 @@
   }
   // Mono label that decodes from scrambled glyphs, one character at a time.
   //   T.eyebrow(ctx, [{s:'1866', c:blue}, {s:' · ST PETERSBURG', c:muted}], x, y, t, t0, {size:20, out:[t1, .3]})
+  // Scrambled glyphs start 0.14 s before t0, so start an incoming eyebrow ≥ 0.15 s after the outgoing
+  // text has finished exiting. The decode runs on the frame time, so motion blur cannot ghost it.
   function eyebrow(ctx, parts, x, y, t, t0, o = {}) {
+    t = M.frameT(t);
     const size = o.size || 20, cps = o.cps || .016, font = o.font || `500 ${size}px ${T.MONO}`;
     let a = 1; if (o.out) a = 1 - E.inCubic(prog(t, o.out[0], o.out[0] + o.out[1])); if (a <= 0 || t < t0 - .1) return;
     ctx.save(); ctx.globalAlpha *= a; setFont(ctx, font, (size * .14).toFixed(2) + 'px'); ctx.textBaseline = 'alphabetic';
@@ -233,6 +247,8 @@
   // p is 0→1 progress (e.g. prog(t, t0, t0+.7)). o.left puts the label to the left of its elbow.
   // The label text only appears from p ≈ 0.45 and is fully sharp at p = 1: schedule any fade-out at
   // least (words / 4.5 + 0.4) s after p reaches 1, or nobody can read it.
+  // Sizes: o.size / o.subSize (defaults T.calloutPx / T.calloutSubPx: 17/19 suit a 1080p screen; set
+  // them to 22/24 for projection and 30/32 for 9:16 phone films). o.titleCol / o.subCol override colours.
   function callout(ctx, ax, ay, lx, ly, p, title, sub, col, o = {}) {
     if (p <= 0) return; ctx.save(); ctx.globalAlpha *= o.a ?? 1;
     const ex = lx + (o.left ? 18 : -18), pts = [[ax, ay], [ex, ly], [lx + (o.left ? 6 : -6), ly]];
@@ -244,13 +260,14 @@
     ctx.strokeStyle = rgba(col, .5 * (1 - clamp(p * 1.4))); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(ax, ay, 4 + 26 * E.outCubic(clamp(p * 1.4)), 0, 7); ctx.stroke();
     const q = E.outCubic(prog(p, .45, 1));
     if (q > 0) {
-      label(ctx, title, lx, ly + 6 + (1 - q) * 10, `500 17px ${T.MONO}`, T.fg, q, o.left ? 'right' : 'left', '2.2px');
-      if (sub) label(ctx, sub, lx, ly + 34 + (1 - q) * 10, `400 19px ${T.BODY}`, T.muted, q, o.left ? 'right' : 'left');
+      const ts = o.size || T.calloutPx, ss = o.subSize || T.calloutSubPx;
+      label(ctx, title, lx, ly + ts * .35 + (1 - q) * 10, `500 ${ts}px ${T.MONO}`, o.titleCol || T.fg, q, o.left ? 'right' : 'left', (ts * .13).toFixed(1) + 'px');
+      if (sub) label(ctx, sub, lx, ly + ts * .35 + ss * 1.45 + (1 - q) * 10, `400 ${ss}px ${T.BODY}`, o.subCol || T.muted, q, o.left ? 'right' : 'left');
     }
     ctx.restore();
   }
   // T.DISP/BODY/MONO and T.fg/muted/faint are defaults; a film overrides them to match its source.
-  window.T = { DISP: 'Georgia, serif', BODY: 'system-ui, sans-serif', MONO: 'ui-monospace, monospace', fg: '#e8ebf5', muted: '#9aa3bf', faint: '#6a7393',
+  window.T = { DISP: 'Georgia, serif', BODY: 'system-ui, sans-serif', MONO: 'ui-monospace, monospace', fg: '#e8ebf5', muted: '#9aa3bf', faint: '#6a7393', calloutPx: 17, calloutSubPx: 19,
     label, arrow, eyebrow, line, layout, tabular, sup, callout, setFont, rec, _log: null };
 
   /* ------------------------------------------------------------------ film */
@@ -289,15 +306,15 @@
       film.blur = [];
       film.subAt = (t, S) => film.blur.reduce((m, [a, b, s]) => (t >= a - .05 && t <= b + .05 ? Math.max(m, s) : m), S);
       film.renderFrame = (i, S = 4, shutter = .5) => {
-        S = S > 1 ? film.subAt(i / film.FPS, S) : 1; const mid = Math.floor(S / 2); let log = [];
+        S = S > 1 ? film.subAt(i / film.FPS, S) : 1; const mid = Math.floor(S / 2); let log = []; T._frameT = i / film.FPS;
         for (let k = 0; k < S; k++) {
           const tk = clamp(i / film.FPS + (S > 1 ? ((k + .5) / S - .5) * shutter / film.FPS : 0), 0, film.DUR - 1e-4);
           T._log = k === mid ? log : null; drawScene(sctx, tk); T._log = null;
           actx.globalAlpha = 1 / (k + 1); actx.globalCompositeOperation = 'source-over'; actx.drawImage(sub, 0, 0);
         }
-        actx.globalAlpha = 1; out.globalAlpha = 1; out.drawImage(acc, 0, 0); post(out, i); film.lastText = log;
+        actx.globalAlpha = 1; out.globalAlpha = 1; out.drawImage(acc, 0, 0); post(out, i); film.lastText = log; T._frameT = null;
       };
-      film.drawAt = t => { drawScene(out, t); post(out, Math.floor(t * film.FPS)); };
+      film.drawAt = t => { T._frameT = t; drawScene(out, t); T._frameT = null; post(out, Math.floor(t * film.FPS)); };
 
       film.start = fontSpecs => {
         film.ready = (async () => { await Promise.all((fontSpecs || []).map(s => document.fonts.load(s, 'Aa1’–·'))); await document.fonts.ready; })();

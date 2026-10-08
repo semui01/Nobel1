@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { launch, openFilm } from '../render.mjs';
+import { launch, openFilm, withTimeout } from '../render.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -18,8 +18,7 @@ fs.mkdirSync(out, { recursive: true });
 
 const browser = await launch();
 const errors = [];
-const page = await openFilm(browser, film);
-page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+const page = await openFilm(browser, film, errors);
 const { DUR, FPS, W, H } = await page.evaluate(() => ({ DUR: window.FILM.DUR, FPS: window.FILM.FPS, W: window.FILM.W, H: window.FILM.H }));
 let times = arg('times', null)?.split(',').map(Number);
 if (!times) { const every = +arg('every', 1); times = []; for (let t = every / 2; t < DUR; t += every) times.push(+t.toFixed(3)); }
@@ -33,14 +32,14 @@ await page.evaluate(([n, cols, cw, ch, outW, outH]) => {
   const o = document.createElement('canvas'); o.width = outW; o.height = outH; o.id = 'one'; document.body.appendChild(o);
 }, [times.length, cols, cw, ch, outW, outH]);
 for (const [k, t] of times.entries()) {
-  const url = await page.evaluate(([t, k, FPS, sub, cols, cw, ch, c]) => {
+  const url = await withTimeout(page.evaluate(([t, k, FPS, sub, cols, cw, ch, c]) => {
     window.FILM.renderFrame(Math.round(t * FPS), sub);
     const src = document.getElementById('c'), one = document.getElementById('one'), o = one.getContext('2d');
     o.drawImage(src, c[0], c[1], c[2], c[3], 0, 0, one.width, one.height);
     const g = document.getElementById('sheet').getContext('2d'), x = (k % cols) * cw, y = Math.floor(k / cols) * ch;
     g.drawImage(one, x, y, cw, ch); g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(x, y, 74, 24); g.fillStyle = '#fff'; g.font = '15px monospace'; g.fillText(t.toFixed(2) + ' s', x + 6, y + 17);
     return one.toDataURL('image/jpeg', .9);
-  }, [t, k, FPS, sub, cols, cw, ch, [cx, cy, cwid, chei]]);
+  }, [t, k, FPS, sub, cols, cw, ch, [cx, cy, cwid, chei]]), 60000, `still at ${t} s`).catch(e => { console.error(e.message); process.exit(1); });
   fs.writeFileSync(path.join(out, `t${t.toFixed(2)}${crop ? '-crop' : ''}.jpg`), Buffer.from(url.split(',')[1], 'base64'));
 }
 if (sheet) {

@@ -18,15 +18,21 @@ export async function loadPlaywright() {
   const root = execSync('npm root -g').toString().trim();
   return await import(pathToFileURL(path.join(root, 'playwright', 'index.mjs')).href);
 }
+// Run a page call with a time limit so a hung page reports instead of stalling the build.
+export function withTimeout(promise, ms, what) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took longer than ${ms / 1000} s`)), ms))]);
+}
 export async function launch() {
   const { chromium } = await loadPlaywright();
   const opts = { args: ['--disable-gpu-vsync', '--disable-frame-rate-limit'] };
   if (process.env.CHROMIUM_PATH) opts.executablePath = process.env.CHROMIUM_PATH;
   return chromium.launch(opts);
 }
-export async function openFilm(browser, film) {
+export async function openFilm(browser, film, errors = null) {
   const p = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   p.on('pageerror', e => { console.error('PAGEERROR', e.message); process.exit(1); });
+  p.on('crash', () => { console.error('The browser page crashed (out of memory?). Re-run; lower --workers if it repeats.'); process.exit(1); });
+  if (errors) p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });   // attached before load, so precompute errors are seen
   await p.goto(pathToFileURL(film).href + '?render');
   await p.waitForFunction(() => window.FILM, null, { timeout: 15000 }).catch(() => { console.error('window.FILM never appeared: did film.start() run?'); process.exit(1); });
   await p.evaluate(() => window.FILM.ready);
@@ -52,7 +58,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   await Promise.all(pages.map(async p => {
     while (next < to) {
       const i = next++;
-      const { data, spans } = await p.evaluate(([i, sub, fmt]) => { window.FILM.renderFrame(i, sub); return { data: document.getElementById('c').toDataURL(fmt === 'png' ? 'image/png' : 'image/jpeg', .95), spans: window.FILM.text() }; }, [i, sub, fmt]);
+      const { data, spans } = await withTimeout(p.evaluate(([i, sub, fmt]) => { window.FILM.renderFrame(i, sub); return { data: document.getElementById('c').toDataURL(fmt === 'png' ? 'image/png' : 'image/jpeg', .95), spans: window.FILM.text() }; }, [i, sub, fmt]), 120000, `frame ${i}`)
+        .catch(e => { console.error(e.message); process.exit(1); });
       fs.writeFileSync(path.join(dir, `f${String(i).padStart(5, '0')}.${fmt === 'png' ? 'png' : 'jpg'}`), Buffer.from(data.slice(data.indexOf(',') + 1), 'base64'));
       texts[i] = spans;
       if (++done % 60 === 0) { const ms = (Date.now() - t0) / done; console.log(`${done}/${to - from} frames · ${ms.toFixed(0)} ms/frame · ~${Math.ceil(ms * (to - from - done) / 1000)} s left`); }

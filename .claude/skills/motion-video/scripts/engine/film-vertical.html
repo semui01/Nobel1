@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Film (9:16)</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+html,body{margin:0;height:100%;background:#05070d;color:#9aa3bf;font:13px/1.4 ui-monospace,monospace}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+canvas{height:calc(100vh - 64px);aspect-ratio:var(--ar,.5625);display:block}
+.ctl{display:flex;gap:12px;align-items:center;width:calc((100vh - 64px)*var(--ar,.5625))}
+.ctl input{flex:1}
+.ctl button{font:inherit;color:#e8ebf5;background:#11162a;border:1px solid #262f4d;border-radius:6px;padding:4px 10px;cursor:pointer}
+body.render{display:block} body.render .ctl{display:none} body.render canvas{height:auto;aspect-ratio:auto}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Motion graphic (vertical)"></canvas>
+<div class="ctl"><button id="pp">Pause</button><input id="scrub" type="range" min="0" max="8" step="0.001" value="0"><span id="tc">0.00 s</span></div>
+<script src="engine.js"></script>
+<script>
+/* VERTICAL STARTER (1080×1920, Reels/Shorts/TikTok): an 8-second film with the phone layout built in.
+   Build it with FILM=film-vertical.html ./build.sh ... ; score.py switches to the phone sound profile for
+   vertical films; use LUFS=-14 for social platforms.
+   Layout (all inside the app-UI safe area, top 11% and bottom 20% kept clear):
+     y 300        eyebrow, 30 px mono, centred
+     y 420 / 526  headline, two centred lines, 96 px
+     y 600–1350   the subject, big (≥ 60% of the width) and bright enough for a phone
+     y 1400–1500  number, label or callout
+     y > 1536     nothing (captions and app buttons sit there) */
+(() => {
+'use strict';
+const {clamp, lerp, prog, E, hash, rgba, glow, add, sim, flash} = M;
+
+const C = {bg:'#141c38', fg:'#eef1fa', muted:'#a3abc6', faint:'#6f789a', accent:'#5aa8ff', warm:'#ffb547', good:'#7bd86f', gold:'#f2d36b'};
+Object.assign(T, {DISP:'"Spectral", Georgia, serif', BODY:'"IBM Plex Sans", system-ui, sans-serif', MONO:'"IBM Plex Mono", ui-monospace, monospace',
+  fg:C.fg, muted:C.muted, faint:C.faint, calloutPx:30, calloutSubPx:32});           // phone-size callouts
+const W = 1080, H = 1920, CX = 540, CY = 975;
+// fadeIn 0: the first frame is often the thumbnail, so it shows the subject rather than black.
+const film = Film.create({W, H, FPS:30, DUR:8, bg:C.bg, fadeIn:0});
+
+const TM = {titleOut:2.5, gather:[2.7, 3.05], count:[3.2, 4.4], flash:5.3, fin:5.35};
+film.blur = [[TM.gather[0], TM.gather[1], 12]];
+const VALUE = 172;                                                                    // placeholder number
+const countAt = t => VALUE * E.outCubic(prog(t, ...TM.count));                         // eases in, then holds ≥ 1 s
+
+const ring = sim({n:140, dur:3.2, seed:5,
+  init:(i, r) => ({a:r()*6.283, rad:300 + r()*120, w:.25 + r()*.35, z:.6 + r()*.6}),
+  step:(p, t, dt) => { p.a += p.w*dt; }});
+
+/* Scene A: a big, bright subject from frame 0, headline at the top. */
+film.scene(0, TM.gather[1] + .05, (ctx, t) => {
+  const g = E.inCubic(prog(t, ...TM.gather));                                          // particles gather into the core
+  add(ctx, () => { glow(ctx, CX, CY, 760, C.accent, .3, .5); glow(ctx, CX, CY, 220 + 120*g, C.accent, .6 + .35*g); glow(ctx, CX, CY, 30, '#ffffff', .95) });   // bright enough for a phone
+  for (let i = 0; i < ring.n; i++) {
+    const p = ring.at(i, t), r = p.rad * (1 - g);
+    ctx.fillStyle = rgba(i % 7 ? C.good : C.gold, .55 + .4*(p.z - .6));
+    ctx.beginPath(); ctx.arc(CX + Math.cos(p.a)*r, CY + Math.sin(p.a)*r*.92, 7*p.z*(1 - .5*g), 0, 7); ctx.fill();
+  }
+  T.eyebrow(ctx, [{s:'CHAPTER 1', c:C.accent}, {s:' · YOUR TOPIC', c:C.muted}], CX, 300, t, .15, {size:30, align:'center', out:[TM.titleOut, .25]});
+  T.line(ctx, [{s:'A big subject,', f:`300 96px ${T.DISP}`, c:C.fg}], CX, 420, t, {t0:.3, align:'center', out:[TM.titleOut, .3]});
+  T.line(ctx, [{s:'centred.', f:`italic 300 96px ${T.DISP}`, c:C.accent, glow:[C.accent, .5, 30]}], CX, 526, t, {t0:.45, align:'center', out:[TM.titleOut, .3]});
+});
+
+/* Scene B: a number that lands and holds, with a progress ring as the art. */
+film.scene(2.9, TM.flash + .1, (ctx, t) => {
+  ctx.globalAlpha = E.outCubic(prog(t, 2.9, 3.15));
+  const v = countAt(M.frameT(t)), sweep = v / VALUE;                                     // discrete value from the frame time
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(C.faint, .35); ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(CX, CY, 330, 0, 7); ctx.stroke();
+  ctx.strokeStyle = C.warm; ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(CX, CY, 330, -Math.PI/2, -Math.PI/2 + sweep*6.283); ctx.stroke();
+  add(ctx, () => { const a = -Math.PI/2 + sweep*6.283; glow(ctx, CX + Math.cos(a)*330, CY + Math.sin(a)*330, 70, C.warm, .7) });
+  T.tabular(ctx, String(Math.round(v)), CX, CY + 70, `300 230px ${T.DISP}`, C.fg, 120, 'center');
+  T.label(ctx, 'units, placeholder', CX, 1440, `400 34px ${T.BODY}`, C.muted, prog(t, 3.2, 3.5), 'center');
+  T.eyebrow(ctx, [{s:'PLACEHOLDER DATA', c:C.warm}], CX, 300, t, 3.15, {size:30, align:'center'});
+  T.line(ctx, [{s:'A number that', f:`300 96px ${T.DISP}`, c:C.fg}], CX, 420, t, {t0:3.3, align:'center'});
+  T.line(ctx, [{s:'lands.', f:`italic 300 96px ${T.DISP}`, c:C.warm, glow:[C.warm, .45, 26]}], CX, 526, t, {t0:3.45, align:'center'});
+});
+
+/* Scene C: end card, complete by DUR − 1.6 s. */
+film.scene(TM.flash - .12, 8, (ctx, t) => {
+  ctx.globalAlpha = E.inOutCubic(prog(t, TM.flash - .12, TM.flash)); ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  add(ctx, () => { glow(ctx, CX, 1180, 520, C.accent, .2, .5); glow(ctx, CX, 1180, 14, '#ffffff', .9) });
+  T.eyebrow(ctx, [{s:'YOUR SOURCE · 2026', c:C.gold}], CX, 760, t, TM.fin + .1, {size:30, align:'center', cps:.012});
+  T.line(ctx, [{s:'Your title', f:`300 104px ${T.DISP}`, c:C.fg}], CX, 880, t, {t0:TM.fin + .15, align:'center', rise:40});
+  T.line(ctx, [{s:'here.', f:`italic 300 104px ${T.DISP}`, c:C.good}], CX, 990, t, {t0:TM.fin + .3, align:'center', rise:40});
+  T.line(ctx, [{s:'One line of credit.', f:`400 34px ${T.BODY}`, c:C.muted}], CX, 1070, t, {t0:TM.fin + .35, st:.04, d:.45, align:'center', rise:16});
+  const uq = E.outCubic(prog(t, TM.fin + .45, TM.fin + .7));
+  if (uq > 0) { T.label(ctx, 'example.org/link', CX - 26, 1440, `600 38px ${T.BODY}`, C.fg, uq, 'center'); T.arrow(ctx, CX + 150, 1440, 40, 38, rgba(C.accent, uq)); }
+});
+
+film.overlay((ctx, t) => flash(ctx, t, TM.flash, CX, CY, {color:C.warm}));
+
+// one tick each time the counter passes another eighth of its value (inverse of its outCubic ease)
+const ticks = []; for (let k = 1; k <= 8; k++) ticks.push(TM.count[0] + (TM.count[1] - TM.count[0]) * (1 - Math.cbrt(1 - k / 8)));
+film.cues = {lightOn:.05, titleOut:TM.titleOut, whips:[], pops:ticks, flash:TM.flash, fin:TM.fin, url:TM.fin + .45,
+  transitions:[TM.gather, [TM.flash - .15, TM.flash + .3]], sync:['pops']};
+
+film.start([`300 40px ${T.DISP}`, `italic 300 40px ${T.DISP}`, `400 20px ${T.BODY}`, `600 20px ${T.BODY}`, `500 20px ${T.MONO}`]);
+})();
+</script>
+</body>
+</html>

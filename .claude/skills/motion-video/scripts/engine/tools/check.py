@@ -59,6 +59,10 @@ base_l, base_c = np.median(mean_l), np.median(corners)
 # not at white. Calibrated on three films whose flashes reviewers measured as visibly grey.
 veil = (corners > max(.08, 3 * base_c)) & (sat < .3) & (mean_l < .85)
 print(f'picture mean luma median {base_l:.2f}, max {mean_l.max():.2f}')
+if venue == 'phone' and base_l < .08:
+    flag('medium', f'the picture is very dark for a phone (median luma {base_l:.2f}): lift the background, enlarge the subject, keep the first frame bright')
+if mean_l[0] < .03:
+    print('        note: the first frame is near-black; platforms often use it as the thumbnail (Film.create({fadeIn: 0}) starts on the picture)')
 if veil.any():
     idx = np.flatnonzero(veil)
     groups = np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
@@ -114,15 +118,18 @@ if has_audio:
         flag('medium', f'{below120:.0%} of the energy is below 120 Hz, which phone speakers cannot play: use Score(profile="phone") and impacts with a click layer')
     elif venue != 'phone' and below60 > .25:
         flag('medium', f'{below60:.0%} of the energy is below 60 Hz, which laptop and room speakers barely reproduce: voice pads higher, keep booms above 40 Hz')
-    run('ffmpeg', '-loglevel', 'error', '-y', '-i', mp4, '-lavfi', 'showspectrumpic=s=1600x500:legend=1:scale=log:fscale=log:stop=12000', base + '-spec.png')
-    print(f'audio   spectrogram {base}-spec.png')
+    run('ffmpeg', '-loglevel', 'error', '-y', '-i', mp4, '-lavfi', 'aformat=channel_layouts=mono,showspectrumpic=s=1600x500:legend=1:scale=log:fscale=log:stop=12000', base + '-spec.png')
+    print(f'audio   spectrogram {base}-spec.png (an overview: low bins smear on a log axis; trust the measured numbers above)')
     # sync: onset of high-frequency energy near each cue, window bounded by the neighbouring cues
     hp = np.fft.irfft(np.fft.rfft(x) * (f > 1500), len(x))
     env = np.convolve(np.abs(hp), np.ones(48) / 48, 'same')
     d = np.diff(env)
-    keys = opt('--sync').split(',') if opt('--sync') else [k for k, val in cues.items() if k not in ('transitions', 'blur', 'whips') and isinstance(val, list) and val and all(isinstance(e, (int, float)) for e in val)]
+    # Which cues to check: --sync, else film.cues.sync (names of lists or single times), else every list of
+    # 3+ plain numbers (two-number lists are usually [start, end] windows, not sound onsets).
+    keys = opt('--sync').split(',') if opt('--sync') else cues.get('sync') or [k for k, val in cues.items() if k not in ('transitions', 'blur', 'whips', 'sync') and isinstance(val, list) and len(val) >= 3 and all(isinstance(e, (int, float)) for e in val)]
     for key in keys:
-        ts = sorted(e for e in cues.get(key, []) if isinstance(e, (int, float)))
+        val = cues.get(key, [])
+        ts = sorted(e for e in (val if isinstance(val, list) else [val]) if isinstance(e, (int, float)))
         offs = []
         for i, t in enumerate(ts):
             lo = min(.03, (t - ts[i - 1]) / 2 if i else .03)
@@ -133,7 +140,8 @@ if has_audio:
         if offs:
             ms = np.array(offs) * 1000
             iqr = np.subtract(*np.percentile(ms, [75, 25]))
-            print(f'sync    "{key}": median {np.median(ms):+.1f} ms over {len(ms)}/{len(ts)} cues (spread {ms.min():+.0f}…{ms.max():+.0f} ms)')
+            print(f'sync    "{key}": median {np.median(ms):+.1f} ms over {len(ms)}/{len(ts)} cues (spread {ms.min():+.0f}…{ms.max():+.0f} ms)'
+                  + ('' if iqr < 15 else '  [scattered: soft or low-pitched attacks read late; not an error on its own]'))
             # Sound is placed from the same cue times, so only a consistent offset over several cues means
             # a real error (wrong fps, a time shift); scattered readings on soft attacks are measurement noise.
             if len(ms) >= 3 and abs(np.median(ms)) > 40 and iqr < 30:

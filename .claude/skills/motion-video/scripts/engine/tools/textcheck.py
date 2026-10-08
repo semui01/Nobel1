@@ -7,6 +7,8 @@ Prints findings; exits 1 if any are 'high'. Thresholds and their reasons:
                  0.4 s + words / 4.5 s (display text is read at roughly 4-5 words per second;
                  changing numbers are exempt; deliberately dim text is judged against its own peak)
   overlap        two texts both above 15% opacity whose boxes overlap by more than 15% of the smaller
+  hand-off       a heading-sized text (≥ 20 px) appearing while another heading is still fading out
+                 (the incoming text should start after the outgoing exit ends)
   end card       everything on the last frame must be complete at least 1.5 s before the end
   word load      distinct words (tokens with letters) on screen / duration should stay under ~3.5 per second
   size           smallest text: 15 px at 16:9 on a screen, 22 px for projection, 30 px for phones
@@ -54,7 +56,7 @@ for (txt, kind), a in sorted(vis.items(), key=lambda kv: first_seen[kv[0]]):
         run = run + 1 if v >= full else 0
         best = max(best, run)
     held = best / fps
-    words = len(txt.split())
+    words = max(1, sum(1 for w in txt.split() if any(ch.isalnum() for ch in w)))
     need = .4 + words / 4.5
     reaches_end = a[-1] >= full
     if held + 1e-6 < need and not (reaches_end and held >= need * .6):
@@ -78,6 +80,20 @@ for (s1, s2), fs in pairs.items():
     fs = sorted(set(fs))
     sev = 'high' if len(fs) > fps * .25 else 'medium'
     add(sev, f'overlap for {len(fs) / fps:.2f} s from {min(fs) / fps:.2f} s: "{s1[:40]}" × "{s2[:40]}"')
+
+# hand-off: a heading appears while another heading is still on its way out
+life = {}
+for key, a in vis.items():
+    if key[1] != 'text' or size.get(key, 0) < 20 or not any(ch.isalpha() for ch in key[0]):
+        continue
+    on = [f for f, spans in frames.items() for s in spans if (s['s'], s['k']) == key and s.get('v', s['a']) > .05]
+    if on:
+        life[key] = (min(on), max(on))
+for kb, (b0, b1) in life.items():
+    for ka, (a0, a1) in life.items():
+        # a real overlap of ≥ 0.12 s (a scene cut under an opaque end card ends its text within a frame or two)
+        if ka != kb and a0 < b0 - .5 * fps and b0 + .12 * fps <= a1 < b0 + .6 * fps and a1 < n - 1:
+            add('medium', f'hand-off at {b0 / fps:.2f} s: "{kb[0][:40]}" appears while "{ka[0][:40]}" is still fading out (until {a1 / fps:.2f} s)')
 
 # end card hold
 if n:

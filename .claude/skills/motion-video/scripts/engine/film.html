@@ -65,9 +65,9 @@ film.scene(0, 3.25, (ctx, t) => {
     ctx.fillStyle = rgba(C.good, .9); ctx.beginPath(); ctx.ellipse(0, 0, 9*p.z, 6*p.z, 0, 0, 7); ctx.fill(); ctx.restore();
   }
   const sg = ctx.createLinearGradient(0,0,1200,0); sg.addColorStop(0, rgba(C.bg,.85)); sg.addColorStop(1, rgba(C.bg,0)); ctx.fillStyle = sg; ctx.fillRect(0,330,1200,320);   // legibility scrim
-  T.eyebrow(ctx, [{s:'CHAPTER 1', c:C.accent}, {s:' · YOUR TOPIC', c:C.muted}], 140, 410, t, .3, {out:[TM.titleOut,.3]});
+  T.eyebrow(ctx, [{s:'01', c:C.accent}, {s:' · YOUR TOPIC', c:C.muted}], 140, 410, t, .3, {out:[TM.titleOut,.3]});
   T.line(ctx, [{s:'A headline of six ', f:`300 92px ${T.DISP}`, c:C.fg}, {s:'words.', f:`italic 300 92px ${T.DISP}`, c:C.accent, glow:[C.accent,.5,30]}], 136, 515, t, {t0:.45, st:.07, out:[TM.titleOut,.35]});
-  T.line(ctx, [{s:'One short supporting line.', f:`400 30px ${T.BODY}`, c:C.muted}], 140, 575, t, {t0:.7, st:.025, rise:18, out:[TM.titleOut,.3]});
+  T.line(ctx, [{s:'One supporting line.', f:`400 30px ${T.BODY}`, c:C.muted}], 140, 575, t, {t0:.7, st:.025, rise:18, out:[TM.titleOut,.3]});
 });
 
 film.scene(TM.whip[0], TM.flash + .3, (ctx, t) => {
@@ -76,10 +76,13 @@ film.scene(TM.whip[0], TM.flash + .3, (ctx, t) => {
   T.eyebrow(ctx, [{s:'2019–2024', c:C.accent}, {s:' · PLACEHOLDER DATA', c:C.muted}], 140, 130, t, TM.whip[0] + .2);
   T.line(ctx, [{s:'Numbers that ', f:`300 66px ${T.DISP}`, c:C.fg}, {s:'climb.', f:`italic 300 66px ${T.DISP}`, c:C.warm, glow:[C.warm,.45,26]}], 136, 210, t, {t0:TM.whip[0] + .3, st:.06});
   ctx.strokeStyle = C.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(BX0-20, BY); ctx.lineTo(BX1, BY); ctx.stroke();
-  let shown = 0;
+  // The counter's value comes from the frame time: computed from t, the motion-blur sub-frames would
+  // each show a different number and average into ghosted digits.
+  const tq = M.frameT(t); let shown = 0;
+  DATA.forEach(([, v], i) => { const pq = prog(tq, barT(i), barT(i) + .45); if (pq > 0) shown = Math.max(shown, v * clamp(E.outBack(pq))); });
   DATA.forEach(([yr, v], i) => {
     const pq = prog(t, barT(i), barT(i) + .45); if (pq <= 0) return;   // gate on prog, not the eased value: outBack(0) is not exactly 0
-    const q = E.outBack(pq); shown = Math.max(shown, v * clamp(q));
+    const q = E.outBack(pq);
     const h = BH * v / 83 * q, x = BX0 + i*bw + bw*.18, w = bw*.64;
     const g = ctx.createLinearGradient(0, BY-h, 0, BY); g.addColorStop(0, C.warm); g.addColorStop(1, rgba(C.warm, .25));
     ctx.fillStyle = g; rrect(ctx, x, BY-h, w, h, 6); ctx.fill();
@@ -88,7 +91,6 @@ film.scene(TM.whip[0], TM.flash + .3, (ctx, t) => {
     T.label(ctx, String(v), x + w/2, BY - h - 16, `500 22px ${T.BODY}`, C.fg, clamp(q), 'center');
   });
   ctx.save(); ctx.globalAlpha *= prog(t, TM.bars0 - .1, TM.bars0 + .2); T.tabular(ctx, String(Math.round(shown)), 140, 520, `300 150px ${T.DISP}`, C.fg, 76); ctx.restore();   // counter with fixed digit cells
-  T.label(ctx, 'units, placeholder', 144, 560, `400 22px ${T.BODY}`, C.muted, prog(t, TM.bars0, TM.bars0 + .3));
   const last = DATA.length - 1, lx = BX0 + last*bw + bw/2;
   T.callout(ctx, lx, BY - BH - 4, 1380, 300, prog(t, TM.callout, TM.callout + .6), 'LARGEST JUMP', 'why it matters', C.warm, {left:true});   // sharp from 5.1 s, held to the flash at 6.1 s
 });
@@ -98,8 +100,8 @@ film.scene(TM.flash - .12, 9, (ctx, t) => {
   add(ctx, () => { glow(ctx, 1640, 520, 520, C.accent, .2, .5); glow(ctx, 1640, 520, 12, '#ffffff', .9) });
   const push = 1 + .02*E.outCubic(prog(t, TM.fin, 9)); ctx.translate(140, 600); ctx.scale(push, push); ctx.translate(-140, -600);   // slow push-in on the end card
   T.eyebrow(ctx, [{s:'YOUR SOURCE · 2026', c:C.gold}], 140, 330, t, TM.fin + .12, {size:22, cps:.012});
-  T.line(ctx, [{s:'The title of ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'your story,', f:`italic 300 112px ${T.DISP}`, c:C.good}], 134, 470, t, {t0:TM.fin + .15, st:.07, rise:44, blur:18});
-  T.line(ctx, [{s:'set as the ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'end card.', f:`italic 300 112px ${T.DISP}`, c:C.accent}], 134, 592, t, {t0:TM.fin + .32, st:.07, rise:44, blur:18});
+  T.line(ctx, [{s:'Your ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'title,', f:`italic 300 112px ${T.DISP}`, c:C.good}], 134, 470, t, {t0:TM.fin + .15, st:.07, rise:44, blur:18});
+  T.line(ctx, [{s:'on the ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'end card.', f:`italic 300 112px ${T.DISP}`, c:C.accent}], 134, 592, t, {t0:TM.fin + .3, st:.07, rise:44, blur:18});
   const dl = E.inOutCubic(prog(t, TM.fin + .6, TM.fin + 1.0)); ctx.fillStyle = rgba(C.gold, .8); ctx.fillRect(140, 768, 1640*dl, 1.5);
   const uq = E.outCubic(prog(t, TM.fin + .7, TM.fin + 1.1));   // every end-card element is complete by DUR − 1.6 s, so the finished card holds
   if (uq > 0) { T.label(ctx, 'example.org/your-link', 1732, 846, `600 36px ${T.BODY}`, C.fg, uq, 'right'); T.arrow(ctx, 1742, 846, 38, 36, rgba(C.accent, uq)); }
@@ -108,14 +110,15 @@ film.scene(TM.flash - .12, 9, (ctx, t) => {
 /* 5. Overlays: persistent chrome and transitions that span scenes. */
 film.overlay((ctx, t) => {
   T.label(ctx, 'Brand', 140, 70, `italic 300 28px ${T.DISP}`, C.fg, .85 * (1 - prog(t, TM.flash - .1, TM.flash)));
-  // Bloom into the end card from the point the end card's light sits on. The bloom's radius is capped at half
-  // the frame width so the corners never lift into a grey veil; the end card is opaque underneath by TM.flash.
+  // Bloom into the end card from the point the end card's light sits on. M.flash keeps the light local and
+  // tinted (no grey veil); the end card is opaque underneath by TM.flash.
   flash(ctx, t, TM.flash, 1640, 520, {color:C.gold});
 });
 
 /* 6. Cues for the score: every audible event, in film seconds. score.py reads these from cues.json. */
 film.cues = {lightOn:TM.lightOn, titleOut:TM.titleOut, whips:[TM.whip], pops:DATA.map((_, i) => barT(i)), callout:TM.callout, flash:TM.flash, fin:TM.fin, url:TM.fin + .7,
-  transitions:[TM.whip, [TM.flash - .15, TM.flash + .3]]};   // transitions: tools/check.py samples extra frames inside these windows
+  transitions:[TM.whip, [TM.flash - .15, TM.flash + .3]],   // tools/check.py samples extra frames inside these windows
+  sync:['pops']};                                            // cue lists tools/check.py checks for audio sync
 
 film.start([`300 40px ${T.DISP}`, `italic 300 40px ${T.DISP}`, `400 20px ${T.BODY}`, `500 20px ${T.BODY}`, `600 20px ${T.BODY}`, `500 20px ${T.MONO}`, `400 20px ${T.MONO}`]);
 })();

@@ -34,10 +34,13 @@ The video should look like it belongs to its source and say only true things.
   (hero plus each major section) and look at the images. Extract colour tokens (CSS custom
   properties), fonts, recurring motifs and the **real data**; reuse that data rather than retyping it.
 - **Source unreachable** (a 403 from a proxy, a login wall): check once (`curl -sSI <url>`; in a
-  sandbox also `curl -sS "$HTTPS_PROXY/__agentproxy/status"`). If the user is around, ask them to
-  paste or upload it. Otherwise search for it (restricted to its domain where possible), confirm each
-  fact with a second source, note which facts came only from search snippets, and say plainly in
-  your summary that the page itself was not read.
+  sandbox also `curl -sS "$HTTPS_PROXY/__agentproxy/status"`). A policy denial is a decision, not a
+  glitch: do not route around it with another fetcher. If the user is around, ask them to paste or
+  upload the page. Otherwise search for it (restricted to its domain where possible); search results
+  are summaries, so quote each figure exactly, confirm it with a second source, and record in the
+  notes which facts rest on search excerpts and which hosts were blocked. Authoritative PDFs (review
+  articles, prize committees' scientific backgrounds) are often reachable with `curl` and readable
+  with `pdftotext`. Say plainly in your summary that the page itself was not read.
 - **Source with no visual identity of its own** (Wikipedia, a paper, a plain README): design a
   neutral, subject-appropriate system yourself (dark navy or deep space for science, for example);
   do not imitate the host site's branding.
@@ -80,9 +83,10 @@ mkdir -p video && cp -r "$SK"/scripts/engine/. video/ && chmod +x video/build.sh
 python3 "$SK"/scripts/fetch_fonts.py video/fonts "Family:ital,wght@0,300;1,300" "Other Family:wght@400;500"
 ```
 
-`fetch_fonts.py` writes `video/fonts/fonts.css` (already linked by `film.html`) and lists glyphs the
-fonts lack. `video/film.html` is a working 9-second starter film that passes every check; keep its
-structure and replace its scenes:
+`fetch_fonts.py` writes `video/fonts/fonts.css` (already linked by the starters) and lists glyphs the
+fonts lack. Two starter films pass every check: `film.html` (16:9, 9 s) and `film-vertical.html`
+(9:16 for Reels/Shorts/TikTok, 8 s, with the phone layout and safe zones built in; build it with
+`FILM=film-vertical.html`). Keep the structure of the one that matches your format and replace its scenes:
 
 1. palette `C` and type tokens `T.DISP/BODY/MONO`,
 2. `Film.create({W, H, FPS, DUR, bg})`,
@@ -90,7 +94,8 @@ structure and replace its scenes:
 4. precomputed data and simulations (`M.sim`),
 5. `film.scene(from, to, draw)` per scene, `film.overlay(draw)` for chrome and flashes,
 6. `film.blur = [[t0, t1, 12], ...]` for fast camera moves,
-7. `film.cues = {...}`: every audible event in film seconds, plus `transitions: [[t0, t1], ...]`,
+7. `film.cues = {...}`: every audible event in film seconds, plus `transitions: [[t0, t1], ...]` and
+   `sync: ['pops', 'hit', ...]` (the cues whose sounds should be checked for sync),
 8. `film.start([font specs])`.
 
 ## 4. Build the scenes
@@ -102,17 +107,20 @@ Engine API (full docs in comments at the top of `engine.js`):
 | `M.prog(t,a,b)`, `M.E.*`, `M.bell`, `M.lerp`, `M.clamp` | all animation is `ease(prog(t, start, end))`; gate on `prog > 0`, not on the eased value |
 | `M.sim({n,dur,seed,init,step,wrap})` → `.at(i,t)` | swarms, particles, flows: precomputed, interpolated, deterministic |
 | `M.hash(a,b)` | per-item variation inside draw functions (never `Math.random`) |
+| `M.frameT(t)` | the output frame's own time: compute anything discrete (counter values, which label shows) from it, or motion blur ghosts it |
 | `M.solveTime(f, v, a, b)` | when a moving playhead reaches item v (for pops and their cues) |
 | `M.cam.apply / point / zoom / path` | zoom-throughs, push-ins, rotation; `path(keys)` for one-world films |
-| `M.flash(ctx, t, at, x, y, {mode})` | transition light: `'bloom'` (local, default) or `'whiteout'` |
+| `M.flash(ctx, t, at, x, y, {mode, color, r, strength})` | transition light: `'bloom'` (local, tinted, default) or `'whiteout'` |
 | `M.glow`, `M.add(ctx, fn)`, `M.rgba`, `M.mix`, `M.mixRGB` | additive light; colours from `#rrggbb` or `[r,g,b]` |
-| `T.eyebrow`, `T.line`, `T.callout` | mono kicker; headline/subline with word reveal, glow, halo, exit; pointer labels |
+| `T.eyebrow`, `T.line`, `T.callout` | mono kicker; headline/subline with word reveal, glow, halo, exit; pointer labels (sizes: `T.calloutPx`/`T.calloutSubPx` or `o.size`/`o.subSize`) |
 | `T.tabular`, `T.label`, `T.arrow`, `T.sup` | jitter-free counters, labels, drawn arrows and superscripts |
 
 Rules that keep the film renderable and checkable:
 - A draw function reads only `t` and precomputed constants: no `Math.random`, `Date`,
   `performance.now`, or state carried between frames (frames render out of order on parallel pages).
 - Draw all text through `T.*`: that is what the text check measures.
+- `film.blur` windows cover anything that moves fast (a flyby, a pass, a pop of motion), not only
+  camera moves; outside them 4 sub-frames strobe into visible copies.
 - Scenes overlap for crossfades; the incoming scene's text starts only after the outgoing text has
   finished exiting.
 - Sizes at 1080p screen: headline 64–120 px, subline 26–30 px, eyebrow 20–22 px mono, labels ≥15 px
@@ -131,13 +139,22 @@ hard edges sliding through a transition; shapes that came out black or grey; was
 grey; things appearing before their beat; fallback-font glyphs; thin lines or text duplicated into
 separate copies in fast moves (raise `film.blur` there).
 
-**Measure the text** with a quick draft render (about 30 s for 12 s of film):
+**Run every check on a quick draft** (1 sub-frame, JPEG frames, fast encode: about a minute for 12 s):
 ```bash
-node render.mjs --frames /tmp/draft --sub 1 --fmt jpeg && python3 tools/textcheck.py /tmp/draft/text.jsonl /tmp/draft/cues.json
+DRAFT=1 ./build.sh /tmp/draft draft.mp4      # add FILM=film-vertical.html LUFS=-14 for a vertical film
 ```
-It reports every text element that is not readable long enough, overlapping text, the end-card hold,
-the words per second, sizes and safe zones. Fix what it marks **high**; treat medium as advice.
-Repeat stills and checks until both are clean. Expect several passes.
+The text check reports every element that is not readable long enough, overlapping text, headings that
+arrive before the previous ones have left, the end-card hold, words per second, sizes and safe zones.
+The rest of `check.py` covers grey washes, darkness on phones, sound and sync (step 7). Fix what it
+marks **high**; read medium findings as strong advice.
+
+**Read it as an expert would.** For every headline and label ask: is it true as worded ("must",
+"always", "scans")? Soften absolutes your sources qualify. Does each callout's anchor touch the thing
+it names? Are names in their proper case (RuvC, Cas9, iPhone) even in all-caps styles? Is every number
+you mention in your summary actually readable on screen (counters should ease into a hold of ≥0.8 s on
+the value that matters)? Does the animation, not just the text, agree with the sources?
+
+Repeat stills, checks and this read until all are clean. Expect several passes.
 
 ## 6. Score
 
@@ -164,7 +181,8 @@ You cannot hear the result. Say so, and tell the user what the checks measured.
 
 ## 8. Deliver
 
-- Send the MP4 and poster with whatever file-delivery tool is available.
+- If a user is present, send the MP4 and poster with whatever file-delivery tool is available;
+  otherwise leave them in the agreed output folder.
 - Save `video/NOTES.md`: the storyboard as built, each on-screen fact with its source, and the
   check results with anything still open.
 - Summarise for the user: length, format, scenes, what was verified and how, what was not (listening),

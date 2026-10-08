@@ -28,7 +28,11 @@ Contents: 1 Pacing and text budget · 2 Visual system · 3 Transitions (recipes)
 ## 2. Visual system
 
 - Take colour tokens, fonts and motifs from the source. Give each colour one meaning and keep it (in
-  the Nobel film blue = light/activation, amber = silencing, green = algae, gold = recognition).
+  the Nobel film blue = light/activation, amber = silencing, green = algae, gold = recognition), and
+  keep meaning colours out of the decorative palette (a teal that marks one element is diluted if the
+  base strands are cyan).
+- Callout anchors touch the thing they name, not a neighbour. Proper names keep their casing (RuvC,
+  Cas9) even in uppercase label styles.
 - Layout at 1080p: 140 px side margins; eyebrow at y≈120–150; headline baseline 80–100 px below;
   display face light (300) at 64–120 px, the one emphasised word italic in the accent colour.
 - Legibility over moving artwork, in order of preference: compose so artwork avoids the text block;
@@ -73,9 +77,11 @@ const wp = prog(t, W0, W1), pan = E.inOutCubic(wp) * W;
 
 **Light into the end card: `M.flash`.** Measured on three films: a full-frame bloom at partial
 opacity over a dark film lifts the corners to 15–35% luma while colour drains, which reads as a grey
-veil for 9–13 frames (check.py flags it). Two modes avoid it:
-- `bloom` (default): the burst stays local (radius capped at half the frame width), the corners stay
-  dark, and the incoming scene crossfades to opaque underneath by the peak.
+veil for 9–13 frames (check.py flags it). A large untinted local bloom still reads as a grey disc.
+Two modes avoid both:
+- `bloom` (default): light tinted with `color` (the halo is the colour mixed toward white, not plain
+  white), radius `r` (default 0.32 × frame width), a gaussian-like falloff with no visible disc edge,
+  `strength` 0–1. The incoming scene crossfades to opaque underneath by the peak.
 - `whiteout`: the frame reaches pure white for 2 frames and falls away exponentially, so the grey
   passage lasts only 2–3 frames and reads as a camera flash.
 
@@ -103,9 +109,11 @@ Scale interpolates in log space so zooms feel even. Keep text in screen space (o
   as time passing; compute each pop time with `M.solveTime(t => playheadX(t), item.x, P0, P1)` and
   export those times as cues.
 - Pop: `E.outBack` gated on `prog > 0`, plus a thin ring ≤ 20–26 px. Big rings everywhere are clutter.
-- A big counter (`T.tabular`, 110–150 px) next to the chart gives the eye a number. Make sure the
-  counter and the captions never contradict each other (a caption announcing 2012 while the counter
-  still reads 1996).
+- A big counter (`T.tabular`, 110–150 px) next to the chart gives the eye a number. Compute its value
+  from `M.frameT(t)` (motion blur otherwise averages several values into ghosted digits), ease it
+  into a hold of ≥0.8 s on the value that matters (a counter racing through 25 minutes per frame never
+  shows its key number), and never let the captions contradict it (a caption announcing 2012 while the
+  counter still reads 1996).
 - Nonlinear axes are fine when they match the source; mark them with a shaded band.
 
 ## 6. Explainers (science, process, how-it-works)
@@ -118,6 +126,9 @@ Reviewers check the animation, not just the captions:
 - Size the key event for the venue: the climactic change should span ≥5% of the frame width or be
   pushed in on.
 - End on the outcome the labels claim (an "edited site" must look edited, not identical to the start).
+- Word headlines as carefully as a lecturer would: "Twenty bases must match" overstates a rule with
+  known exceptions; "Twenty bases pair with the target" does not.
+- Push in on the outcome rather than pulling away from it, unless the end card shows it large again.
 - Label simplifications in the notes file ("schematic, not to scale").
 
 ## 7. Simulations
@@ -128,9 +139,12 @@ particles freeze. Use `wrap` for wrapping coordinates. Give particles a `z` for 
 
 ## 8. Polish and motion blur
 
-- `SUB=4` sub-frames over a half-frame shutter suits ordinary motion. In fast camera moves (zooms,
-  pulls, whip pans) 4 sub-frames strobe into separate copies: stars become ladders of dots, rings
-  stack, letters double. Declare those windows: `film.blur = [[t0, t1, 12]]` (12–16 there).
+- `SUB=4` sub-frames over a half-frame shutter suits ordinary motion. In fast moves (camera zooms,
+  pulls, whip pans, and fast objects such as a planet flyby) 4 sub-frames strobe into separate copies:
+  stars become ladders of dots, rings stack, letters double. Declare those windows:
+  `film.blur = [[t0, t1, 12]]` (12–16 there). Check them with `stills.mjs --sub 12 --crop ...`.
+- Discrete things (digits, which word is shown, scrambled glyphs) must come from `M.frameT(t)`; the
+  engine already does this for `T.eyebrow`.
 - Grain (default 0.09 overlay) dithers 8-bit gradients, which otherwise band in H.264.
 - Vignette 0.5; additive glows for light; a thin horizontal gradient line through a light source
   reads as an anamorphic flare.
@@ -157,6 +171,9 @@ particles freeze. Use `wrap` for wrapping coordinates. Give particles a `z` for 
 | Particles stop moving | sampled past the sim's `dur` | extend `dur` |
 | Lines fat or vanishing while zooming | line width in world units | `lineWidth = px / s` |
 | Squashed contact sheets or vignette for vertical films | 16:9 assumptions | fixed in the engine; use `FILM.W/H`, not constants |
+| Counter digits or decoded text ghost into overlapping glyphs | each motion-blur sub-frame drew a different value | compute discrete values from `M.frameT(t)` |
+| A still or frame render hangs | a page stalled after an edit | tools now time out with a message; re-run |
+| A steady band in the spectrogram with no source in score.py | display artefact of the log-frequency picture | trust check.py's measured numbers; measure before "fixing" |
 
 ## 10. Performance
 
@@ -167,10 +184,15 @@ drafts. PNG frames are ~2.5 MB each.
 
 ## 11. Other formats and venues
 
-- **9:16 (1080×1920), Reels/Shorts/TikTok:** 1080 px is the phone's width, so eyebrows and labels
-  ≥30 px, sublines ≥32 px, headlines 72–96 px. Keep text out of the top ~11% and bottom ~20% (app
-  UI and captions). At most ~4 text elements per scene. Stack instead of side-by-side. 30 fps is
-  enough (the apps play at 30) and halves render time. Use `Score(profile='phone')` and `LUFS=-14`.
+- **9:16 (1080×1920), Reels/Shorts/TikTok:** start from `film-vertical.html`. 1080 px is the phone's
+  width, so eyebrows and labels ≥30 px, sublines ≥32 px, headlines 90–100 px. Layout: eyebrow baseline
+  y≈300, a two-line centred headline at y≈420 and 526, the subject in y 600–1350, numbers or labels
+  at y 1400–1500, nothing below y 1536 (captions, app buttons; avoid the right-hand action rail around
+  x > 900, y 1000–1650 too). At most ~4 text elements per scene. Make the subject big (≥60% of the
+  width) and the frame bright enough for a phone (check.py warns below a median luma of 0.08). Start on
+  the picture, not black (`fadeIn: 0`; the first frame is often the thumbnail), and give the first
+  second motion. 30 fps is enough (the apps play at 30) and halves render time. The template score
+  switches to the phone sound profile for vertical films; build with `LUFS=-14`.
 - **1:1 (1080×1080):** 100 px margins, headline 64–80 px.
 - **Projection (lectures, talks):** labels ≥22 px, stronger contrast, no essential detail in thin
   dim lines; keep the low end moderate (room PAs rumble, laptops lose it).

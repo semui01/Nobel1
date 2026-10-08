@@ -26,6 +26,9 @@ Design rules:
   arpeggio timed to the title words.
 - Automate the pad's brightness with the story: closed at the start, open as things build, dimmed
   while something is silenced, brightest at the reveal.
+- **Hierarchy:** the loudest accents belong to the events the headline names (the cut, the
+  crossing, the reveal), not to incidental ticks. Keep repeated small events (counters, ticks)
+  well below the hits.
 
 ## Low end and venues
 
@@ -55,9 +58,10 @@ and sync, and writes `<film>-spec.png`.
   times, so only a *consistent* offset across several cues is an error (a wrong fps, a shifted list).
   Soft or tonal sounds (pads, slow bells) have no sharp onset and show scattered or no readings;
   that is expected.
-- **Spectrogram:** each event should show as a distinct mark above the pad's horizontal bands. A
-  steady band can be coincident harmonics of the chord (D5 is the 9th harmonic of C2, the 6th of G2,
-  the 3rd of G3), not a stray tone.
+- **Spectrogram:** an overview only. Each event should show as a distinct mark above the pad's
+  horizontal bands. Low frequencies smear on its log axis, and test agents have chased bands that the
+  audio did not contain, so trust check.py's measured numbers and measure with numpy before
+  acting on anything that only the picture shows.
 
 Then tell the user the mix was checked by measurement only and that they should listen before
 publishing.
