@@ -10,7 +10,7 @@ rendering, so you can work on the score early.
 | Layer | Instrument | What triggers it | Typical gain |
 |---|---|---|---|
 | Bed | `Score.chord` (pad with brightness automation) | one chord per scene, crossfading at cuts | 0.06–0.07 per note |
-| Data points | `mallet`, pitch from a pentatonic scale, pan from x | each item popping in | 0.07 minor, 0.13 milestone |
+| Data points | `mallet` on a pentatonic scale whose notes sit in the bed's chords; pitch from the value (low → low), pan from x; a quiet `tick` on top | each item popping in | 0.07 minor, 0.13 milestone |
 | Reveals | `bell` (ratio 2.0 glassy, 3.5 metallic) | a light turning on, a discovery, a title | 0.08–0.17 |
 | Clicks | `tick`, `pop` | pulses, UI blips, spikes, switches, letters pairing | 0.04–0.35 |
 | Motion | `whoosh`, `whip` | zooms (rising), pull-outs (falling), whip pans | 0.22–0.3 |
@@ -29,6 +29,8 @@ Design rules:
 - **Hierarchy:** the loudest accents belong to the events the headline names (the cut, the
   crossing, the reveal), not to incidental ticks. Keep repeated small events (counters, ticks)
   well below the hits.
+- **Pulse** for teasers over ~15 s: a soft tick or low mallet on a tempo grid (120 BPM = 0.5 s);
+  build `TM` from `beat(n) = n * 0.5` so cuts and hits land on beats. Slow pads alone drift.
 
 ## Low end and venues
 
@@ -57,7 +59,8 @@ and sync, and writes `<film>-spec.png`.
   neighbouring cue) and reports the median offset per cue list. Sounds are placed from the same cue
   times, so only a *consistent* offset across several cues is an error (a wrong fps, a shifted list).
   Soft or tonal sounds (pads, slow bells) have no sharp onset and show scattered or no readings;
-  that is expected.
+  that is expected. A cue list named in `sync` needs energy above 1.5 kHz in its first milliseconds:
+  low mallets have none and read 30–50 ms late, so layer a quiet `tick` on them (the template does).
 - **Spectrogram:** an overview only. Each event should show as a distinct mark above the pad's
   horizontal bands. Low frequencies smear on its log axis, and test agents have chased bands that the
   audio did not contain, so trust check.py's measured numbers and measure with numpy before

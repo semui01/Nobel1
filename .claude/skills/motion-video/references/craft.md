@@ -8,8 +8,8 @@ Contents: 1 Pacing and text budget · 2 Visual system · 3 Transitions (recipes)
 
 - Display text is read at roughly 4–5 words per second once it is sharp. The text check requires
   each element to be fully sharp for `0.4 s + words / 4.5` (a 6-word headline: 1.7 s; a 2-word label:
-  0.85 s). A callout's text appears only at about 45% of its progress, so schedule its fade at least
-  that long after it completes.
+  0.85 s). A callout's text fades in from 45% of its progress and is sharp at 100%; schedule its fade
+  at least `0.4 s + words/4.5` after its progress reaches 1.
 - Keep the whole film under ~3.5 words per second, labels included. Tested films that failed this
   carried 12 words per second; every reviewer flagged it. Cut secondary labels, footnotes and
   citations first (citations belong in the notes file and the post, not on screen), then shorten
@@ -17,9 +17,12 @@ Contents: 1 Pacing and text budget · 2 Visual system · 3 Transitions (recipes)
 - Scene budget: 0.3 s reveal, the readable hold, the visual payoff, then exit text 0.2–0.3 s before
   the transition. The next scene's text starts only after the previous text has finished exiting
   (overlapping eyebrows decode into garbage).
-- 15 s ≈ 6–7 scenes; 30 s ≈ 10–12. If the story has more beats than time, merge them into a montage
-  (the Nobel film shows three brain-circuit findings in 1.1 s by lighting regions in turn with a
-  sidebar list).
+- About 2–2.5 s per headline scene and 3–4 s per data scene (build ~1 s, reading time, ≥0.8 s hold
+  on the key value). 15 s ≈ 6–7 scenes; 20 s ≈ 8 (5–6 if most are data); 30 s ≈ 10–12. If the story
+  has more beats than time, merge them into a montage (the Nobel film shows three brain-circuit
+  findings in 1.1 s by lighting regions in turn with a sidebar list).
+- For teasers over ~15 s, a pulse helps: lay beats on a tempo grid (120 BPM = 0.5 s) and build `TM`
+  from it so cuts and hits land on beats (see sound.md).
 - Open on motion and the subject. End on a card that is complete ≥1.5 s before the last frame, with
   a slow push-in (scale 1 → 1.02) so it is not dead.
 - Let one element carry across each cut (a point of light, a shape, a line). Continuity is what makes
@@ -33,8 +36,9 @@ Contents: 1 Pacing and text budget · 2 Visual system · 3 Transitions (recipes)
   base strands are cyan).
 - Callout anchors touch the thing they name, not a neighbour. Proper names keep their casing (RuvC,
   Cas9) even in uppercase label styles.
-- Layout at 1080p: 140 px side margins; eyebrow at y≈120–150; headline baseline 80–100 px below;
-  display face light (300) at 64–120 px, the one emphasised word italic in the accent colour.
+- Layout at 1080p: 140 px side margins; eyebrow at y≈120–150; headline baseline 80–100 px below.
+  The starters' house style is a light (300) display face at 64–120 px with one emphasised word in
+  italic and the accent colour; take weight and emphasis from the source when it has its own.
 - Legibility over moving artwork, in order of preference: compose so artwork avoids the text block;
   a scrim (background-colour gradient from the text side, alpha ~0.85 → 0); fade the crossing element
   out before it reaches the text; `T.line(..., {halo: C.bg})`.
@@ -75,10 +79,9 @@ const wp = prog(t, W0, W1), pan = E.inOutCubic(wp) * W;
 // outgoing: alpha *= 1 - E.inCubic(wp); translate(-pan, 0)   incoming: alpha *= E.outCubic(wp); translate(W - pan, 0)
 ```
 
-**Light into the end card: `M.flash`.** Measured on three films: a full-frame bloom at partial
-opacity over a dark film lifts the corners to 15–35% luma while colour drains, which reads as a grey
-veil for 9–13 frames (check.py flags it). A large untinted local bloom still reads as a grey disc.
-Two modes avoid both:
+**Light into the end card: `M.flash`.** A full-frame bloom at partial opacity over a dark film reads
+as a grey veil (check.py flags it as a grey wash), and a large untinted local bloom as a grey disc.
+`M.flash` avoids both:
 - `bloom` (default): light tinted with `color` (the halo is the colour mixed toward white, not plain
   white), radius `r` (default 0.32 × frame width), a gaussian-like falloff with no visible disc edge,
   `strength` 0–1. The incoming scene crossfades to opaque underneath by the peak.
@@ -86,7 +89,9 @@ Two modes avoid both:
   passage lasts only 2–3 frames and reads as a camera flash.
 
 **Text in and out.** `T.line` words rise with a blur, staggered 0.05–0.08 s; exits rise further.
-`T.eyebrow` decodes at ~60 characters per second.
+`T.eyebrow` decodes at ~60 characters per second and shows scrambled glyphs from 0.14 s before its
+start, so start it ≥0.15 s after the outgoing text has left (a whip that carries the old text
+off-screen is the exception).
 
 ## 4. One-world films
 
@@ -105,6 +110,13 @@ Scale interpolates in log space so zooms feel even. Keep text in screen space (o
 
 ## 5. Data scenes
 
+**Getting data in.** The film opens from `file://`, where `fetch()` fails. Download and aggregate the
+raw data in a script kept with the film (`video/data/prepare.py`), reduce it to the few hundred numbers
+the film shows, and write `video/data.js` as `window.DATA = {...}`; load it with
+`<script src="data.js"></script>` before the film's script. Record the dataset URL, version or
+retrieval date and licence in `NOTES.md`, and credit the publisher on the end card. Every number on
+screen comes from that script's output.
+
 - Use the source's real data. A playhead that sweeps an axis and makes items pop as it passes reads
   as time passing; compute each pop time with `M.solveTime(t => playheadX(t), item.x, P0, P1)` and
   export those times as cues.
@@ -114,6 +126,22 @@ Scale interpolates in log space so zooms feel even. Keep text in screen space (o
   into a hold of ≥0.8 s on the value that matters (a counter racing through 25 minutes per frame never
   shows its key number), and never let the captions contradict it (a caption announcing 2012 while the
   counter still reads 1996).
+- Text that changes as it plays (a rolling month, the name under a playhead) is a counter, not a label:
+  draw it with `T.tabular` or `T.label(..., kind='number')` from `M.frameT(t)`, or the text check
+  treats every value as a separate label that nobody had time to read.
+- Line over time: clip the line to x ≤ playheadX(t); put a glowing head dot and a `T.tabular` value at
+  the playhead.
+- Morph between charts: keep the same items and interpolate each mark's geometry between two layouts
+  (bars → dots on a map; the line's last point → the next scene's counter). It is the data version
+  of a transition that comes out of the content.
+- Maps: project lon/lat once at load (equirectangular with x scaled by cos(lat0) is fine for a city).
+  Draw heavy static layers (streets, coastlines) into an offscreen canvas once and `drawImage` it each
+  frame; thousands of paths × 12–16 blur sub-frames otherwise dominate render time. Credit the
+  geometry (e.g. © OpenStreetMap contributors).
+- Density: more than ~8 pops a second reads as a texture, not as events. Animate it as a sweep and give
+  sound only to milestones.
+- Honesty: name the quantity as the dataset defines it (passages at counters, not riders or trips),
+  state the period and coverage, start bars at zero, note gaps in `NOTES.md`.
 - Nonlinear axes are fine when they match the source; mark them with a shaded band.
 
 ## 6. Explainers (science, process, how-it-works)
@@ -142,9 +170,8 @@ particles freeze. Use `wrap` for wrapping coordinates. Give particles a `z` for 
 - `SUB=4` sub-frames over a half-frame shutter suits ordinary motion. In fast moves (camera zooms,
   pulls, whip pans, and fast objects such as a planet flyby) 4 sub-frames strobe into separate copies:
   stars become ladders of dots, rings stack, letters double. Declare those windows:
-  `film.blur = [[t0, t1, 12]]` (12–16 there). Check them with `stills.mjs --sub 12 --crop ...`.
-- Discrete things (digits, which word is shown, scrambled glyphs) must come from `M.frameT(t)`; the
-  engine already does this for `T.eyebrow`.
+  `film.blur = [[t0, t1, 12]]` (12–16 there). `stills.mjs --times/--transitions/--crop` render with 4
+  sub-frames plus those windows, like the final build, so the copies show up in stills.
 - Grain (default 0.09 overlay) dithers 8-bit gradients, which otherwise band in H.264.
 - Vignette 0.5; additive glows for light; a thin horizontal gradient line through a light source
   reads as an anamorphic flare.
@@ -170,29 +197,31 @@ particles freeze. Use `wrap` for wrapping coordinates. Give particles a `z` for 
 | Counters jitter | proportional figures | `T.tabular` |
 | Particles stop moving | sampled past the sim's `dur` | extend `dur` |
 | Lines fat or vanishing while zooming | line width in world units | `lineWidth = px / s` |
-| Squashed contact sheets or vignette for vertical films | 16:9 assumptions | fixed in the engine; use `FILM.W/H`, not constants |
 | Counter digits or decoded text ghost into overlapping glyphs | each motion-blur sub-frame drew a different value | compute discrete values from `M.frameT(t)` |
-| A still or frame render hangs | a page stalled after an edit | tools now time out with a message; re-run |
-| A steady band in the spectrogram with no source in score.py | display artefact of the log-frequency picture | trust check.py's measured numbers; measure before "fixing" |
+| A steady band in the spectrogram with no source in score.py | display artefact of the log-frequency picture | trust check.py's measured numbers |
+| Empty background after the end card | the film's length typed as a number in a scene end | end scenes at `DUR` |
+| Shapes or text sized for 16:9 on a vertical film | constants instead of `W`/`H` | derive positions from `W`, `H` |
 
 ## 10. Performance
 
 Measured: 150 ms per 1080p frame on a quiet 4-core machine with 4 workers and 4 sub-frames; 300–500
-ms with 2 workers or another render running. Time the first 60 frames and extrapolate.
-`ctx.filter = 'blur()'` on single words is fine; avoid full-frame blur. Use `--sub 1 --fmt jpeg` for
-drafts. PNG frames are ~2.5 MB each.
+ms with 2 workers or another render running; 3–4× that inside `film.blur` windows. A `DRAFT=1` build
+of 9 s takes about 40 s. `ctx.filter = 'blur()'` on single words is fine; avoid full-frame blur.
+Cache static layers in an offscreen canvas. PNG frames are ~2.2 MB each.
 
 ## 11. Other formats and venues
 
 - **9:16 (1080×1920), Reels/Shorts/TikTok:** start from `film-vertical.html`. 1080 px is the phone's
-  width, so eyebrows and labels ≥30 px, sublines ≥32 px, headlines 90–100 px. Layout: eyebrow baseline
+  width, so eyebrows and labels ≥30 px, sublines ≥32 px, headlines 90–104 px. Layout: eyebrow baseline
   y≈300, a two-line centred headline at y≈420 and 526, the subject in y 600–1350, numbers or labels
-  at y 1400–1500, nothing below y 1536 (captions, app buttons; avoid the right-hand action rail around
-  x > 900, y 1000–1650 too). At most ~4 text elements per scene. Make the subject big (≥60% of the
+  at y 1400–1500, nothing above y 221 or below y 1536 (status bar, captions, app buttons; avoid the
+  right-hand action rail around x > 900, y 1000–1650 too). At most ~4 text elements per scene. Make the subject big (≥60% of the
   width) and the frame bright enough for a phone (check.py warns below a median luma of 0.08). Start on
   the picture, not black (`fadeIn: 0`; the first frame is often the thumbnail), and give the first
-  second motion. 30 fps is enough (the apps play at 30) and halves render time. The template score
-  switches to the phone sound profile for vertical films; build with `LUFS=-14`.
+  second motion. 30 fps is enough (the apps play at 30) and halves render time. The build switches to
+  the phone sound profile and −14 LUFS for vertical films and for `VENUE=phone`.
+- **16:9 in a social feed:** the frame is shown at phone width, so text must be ≥53 px (30 px per
+  1080 px of width); `VENUE=phone`, 30 fps.
 - **1:1 (1080×1080):** 100 px margins, headline 64–80 px.
 - **Projection (lectures, talks):** labels ≥22 px, stronger contrast, no essential detail in thin
   dim lines; keep the low end moderate (room PAs rumble, laptops lose it).

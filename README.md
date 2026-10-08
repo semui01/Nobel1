@@ -24,3 +24,11 @@ Open `index.html` in a browser. No build step; fonts load from Google Fonts.
 ## Video
 
 `video/optogenetics-15s.mp4` is a 15-second, 1080p60 motion graphic of the same story, with sound. `video/motion.html` is its source: open it for a live preview (space pauses, arrow keys step frames). `video/build.sh` re-renders it with headless Chromium, numpy and ffmpeg.
+
+## Making videos like this for other topics
+
+`.claude/skills/motion-video` is a Claude Code skill built from this video's pipeline and tested on
+new topics. In a Claude Code session in this repo, ask for something like "a 15-second motion
+graphics video for <topic, URL or dataset>" and it is used automatically. It includes starter films
+(16:9 and 9:16), the renderer, a cue-driven sound synthesiser and automatic checks for readability,
+grey flashes, low end and sync.

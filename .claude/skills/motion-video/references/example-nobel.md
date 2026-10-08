@@ -2,9 +2,8 @@
 
 Source: an interactive single-page history of optogenetics (semui01/Nobel1, `index.html`), dark
 navy theme, Spectral + IBM Plex, spectral colours as data (470 nm blue excites, 589 nm amber
-silences). The film is `video/motion.html` in that repository. It predates this skill's engine
-but uses the same helpers (the engine was extracted from it), so it is the reference for
-ambition and detail.
+silences). The film is `video/motion.html` in that repository (not bundled with this skill; the
+storyboard below is the part to learn from). The engine was extracted from it.
 
 ## Storyboard as built
 
@@ -30,13 +29,8 @@ A year rail along the bottom tracked each scene's place in the 160-year timeline
   khaki flash, a fibre running through a headline, a hard background edge in a whip pan, a cluttered
   crossfade in the zoom, and smeared rail labels.
 
-## What the checks say about it now
-
-Run through today's `tools/check.py`, the film passes sync (spike sounds +3.7 ms from their frames)
-but is flagged for a **grey wash at 12.48–12.70 s**: the flash into the end card was a full-frame
-bloom at partial opacity, which lifts the corners to ~34% luma while colour drains. That measurement
-is where `M.flash` and its two modes came from. It also has 27% of its energy below 60 Hz, more than
-small speakers can use.
+Today's `check.py` flags its end-card flash as a grey wash (12.48–12.70 s) and 27% of its energy
+below 60 Hz; those two measurements are where `M.flash` and the low-end rules came from.
 
 ## Numbers
 

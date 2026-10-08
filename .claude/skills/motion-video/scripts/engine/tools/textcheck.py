@@ -10,9 +10,11 @@ Prints findings; exits 1 if any are 'high'. Thresholds and their reasons:
   hand-off       a heading-sized text (≥ 20 px) appearing while another heading is still fading out
                  (the incoming text should start after the outgoing exit ends)
   end card       everything on the last frame must be complete at least 1.5 s before the end
-  word load      distinct words (tokens with letters) on screen / duration should stay under ~3.5 per second
-  size           smallest text: 15 px at 16:9 on a screen, 22 px for projection, 30 px for phones
-  safe zones     vertical films: no text in the top 11% or bottom 20% (app UI on Reels/Shorts/TikTok)
+  word load      words (tokens with letters) summed over every distinct text element / duration: ≤ ~3.5 per second
+  never readable a text that is on screen but never sharp (cut off while decoding or blurring in)
+  size           smallest text: 15 px on a 1080p screen, 22 px for projection, 30 px per 1080 px of
+                 width for phones (so 53 px in a 16:9 film watched in a phone feed)
+  safe zones     vertical films: no text in the top 11.5% or bottom 20% (app UI on Reels/Shorts/TikTok)
 """
 import json
 import sys
@@ -24,6 +26,8 @@ cues = json.load(open(cues_path))
 fps, dur, W, H = cues['fps'], cues['dur'], cues.get('W', 1920), cues.get('H', 1080)
 if venue is None:
     venue = 'phone' if H > W else 'screen'
+if venue not in ('screen', 'projector', 'phone'):
+    sys.exit(f'--venue must be screen, projector or phone (got {venue!r})')
 frames = {}
 for line in open(text_path):
     if line.strip():
@@ -49,6 +53,11 @@ for f, spans in frames.items():
 
 for (txt, kind), a in sorted(vis.items(), key=lambda kv: first_seen[kv[0]]):
     if kind == 'number':
+        continue
+    if max(a) < .3:
+        seen = sum(1 for f, spans in frames.items() if any((s['s'], s['k']) == (txt, kind) and s.get('v', s['a']) > .15 for s in spans))
+        if seen >= fps * .15:
+            add('high', f'never readable: on screen for {seen / fps:.2f} s from {first_seen[(txt, kind)] / fps:.2f} s but never sharp: "{txt[:70]}"')
         continue
     full = .9 * max(a)
     best = run = 0
@@ -117,9 +126,11 @@ if dur and words / dur > 3.5:
 
 # size and safe zones
 min_px = {'screen': 15, 'projector': 22, 'phone': 30}[venue] * (max(W, H) / 1920 if venue != 'phone' else W / 1080)
-small = sorted({(t, round(size[(t, k)])) for (t, k) in vis if size[(t, k)] < min_px - .5})
+small = sorted({(t, round(size[(t, k)])) for (t, k) in vis if size[(t, k)] < min_px - .5}, key=lambda x: x[1])
 for t, px in small[:8]:
     add('medium', f'text {px} px is below the {min_px:.0f} px minimum for {venue}: "{t[:50]}"')
+if len(small) > 8:
+    add('medium', f'... and {len(small) - 8} more text elements below {min_px:.0f} px')
 if H > W:
     top, bottom = H * .115, H * (1 - .2)
     bad = set()
@@ -129,6 +140,8 @@ if H > W:
                 bad.add(s['s'])
     for t in sorted(bad)[:8]:
         add('medium', f'text inside the app-UI zone (top {top:.0f} px / bottom {H - bottom:.0f} px): "{t[:50]}"')
+    if len(bad) > 8:
+        add('medium', f'... and {len(bad) - 8} more text elements inside the app-UI zones')
 
 order = {'high': 0, 'medium': 1}
 for sev, msg in sorted(findings, key=lambda x: order[x[0]]):

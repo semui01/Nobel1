@@ -20,7 +20,9 @@ export async function loadPlaywright() {
 }
 // Run a page call with a time limit so a hung page reports instead of stalling the build.
 export function withTimeout(promise, ms, what) {
-  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took longer than ${ms / 1000} s`)), ms))]);
+  let id;
+  const timer = new Promise((_, rej) => { id = setTimeout(() => rej(new Error(`${what} took longer than ${ms / 1000} s`)), ms); });
+  return Promise.race([promise, timer]).finally(() => clearTimeout(id));   // cleared, so node exits as soon as the work is done
 }
 export async function launch() {
   const { chromium } = await loadPlaywright();
@@ -45,11 +47,21 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const sub = +arg('sub', 4), workers = +arg('workers', 4), fmt = arg('fmt', 'png');
   fs.mkdirSync(dir, { recursive: true });
   const browser = await launch();
-  const first = await openFilm(browser, film);
+  const errors = [];
+  const first = await openFilm(browser, film, errors);
   const { FPS, DUR, CUES } = await first.evaluate(() => ({ FPS: window.FILM.FPS, DUR: window.FILM.DUR, CUES: window.FILM.CUES }));
+  if (errors.length) console.error('film console errors:\n  ' + [...new Set(errors)].join('\n  '));
   fs.writeFileSync(path.join(dir, 'cues.json'), JSON.stringify(CUES));
   if (process.argv.includes('--cues-only')) { console.log('cues →', path.join(dir, 'cues.json')); await browser.close(); process.exit(0); }
   const total = Math.round(FPS * DUR), from = +arg('from', 0), to = Math.min(total, +arg('to', total));
+  const ext = fmt === 'png' ? 'png' : 'jpg', other = ext === 'png' ? 'jpg' : 'png';
+  const frameFiles = fs.readdirSync(dir).filter(f => /^f\d{5}\.(png|jpg)$/.test(f));
+  if (from === 0 && to === total) {
+    // Full render: remove frames of the other format and any tail left by a longer earlier version.
+    for (const f of frameFiles) if (f.endsWith(other) || +f.slice(1, 6) >= total) fs.unlinkSync(path.join(dir, f));
+  } else if (frameFiles.some(f => f.endsWith(other))) {
+    console.error(`${dir} holds .${other} frames; a partial --from/--to render in .${ext} would mix formats. Render the whole film, or use the same --fmt.`); process.exit(1);
+  }
   const pages = [first];
   for (let i = 1; i < workers; i++) pages.push(await openFilm(browser, film));
   const textPath = path.join(dir, 'text.jsonl'), texts = {};
@@ -68,4 +80,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   fs.writeFileSync(textPath, Object.keys(texts).map(Number).sort((a, b) => a - b).map(f => JSON.stringify({ f, spans: texts[f] })).join('\n') + '\n');
   console.log(`rendered ${done} frames (${FPS} fps, ${DUR} s) in ${((Date.now() - t0) / 1000).toFixed(1)} s → ${dir}`);
   await browser.close();
+  process.exit(0);
 }

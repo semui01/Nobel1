@@ -2,8 +2,9 @@
 and on-screen text (via textcheck.py). Writes review images next to the film.
 
 usage: python3 tools/check.py film.mp4 frames/cues.json [--sync KEY,KEY] [--venue screen|projector|phone]
-  --sync   list-valued cues whose times should each carry a sound transient (default: every list of
-           plain numbers in cues.json except transitions/blur)
+  --sync   cues whose times should each carry a sound transient (lists or single times). Default:
+           film.cues.sync if the film sets it, else every list of ≥3 plain numbers except
+           transitions/blur/whips (so set `sync` explicitly when cues carry lists of values)
   --venue  sets text-size and low-end thresholds (default: phone for vertical films, else screen)
 Outputs: <film>-sheet.jpg (16 frames), <film>-transitions.jpg (3 frames inside every cues.transitions
 window and around cues.flash), <film>-spec.png (spectrogram). Exits 1 if anything is marked high.
@@ -38,6 +39,8 @@ v = next(s for s in probe['streams'] if s['codec_type'] == 'video')
 W, H = int(v['width']), int(v['height'])
 has_audio = any(s['codec_type'] == 'audio' for s in probe['streams'])
 venue = opt('--venue') or ('phone' if H > W else 'screen')
+if venue not in ('screen', 'projector', 'phone'):
+    sys.exit(f'--venue must be screen, projector or phone (got {venue!r})')
 mdur = float(probe['format']['duration'])
 print(f"video   {W}x{H} @ {v['r_frame_rate']} fps, {mdur:.3f} s (film: {dur} s), venue={venue}")
 if abs(mdur - dur) > 1.5 / fps:
@@ -82,8 +85,14 @@ def sheet(frames, path, cols):
     sel = '+'.join(f'eq(n\\,{f})' for f in frames)
     tw = 480 if W >= H else 300
     rows = (len(frames) + cols - 1) // cols
-    run('ffmpeg', '-loglevel', 'error', '-y', '-i', mp4, '-vf', f"select='{sel}',scale={tw}:-2,tile={cols}x{rows}", '-frames:v', '1', '-fps_mode', 'passthrough', path)
-    print(f'sheet   {path}  ({len(frames)} frames)')
+    args = ['ffmpeg', '-loglevel', 'error', '-y', '-i', mp4, '-vf', f"select='{sel}',scale={tw}:-2,tile={cols}x{rows}", '-frames:v', '1']
+    r = run(*args, '-fps_mode', 'passthrough', path, text=True)
+    if r.returncode:   # ffmpeg before 5.1 has no -fps_mode
+        r = run(*args, '-vsync', 'passthrough', path, text=True)
+    if r.returncode or not os.path.exists(path):
+        flag('medium', f'could not write {path}: {r.stderr.strip()[:200]}')
+    else:
+        print(f'sheet   {path}  ({len(frames)} frames)')
 
 
 cols = 4 if W >= H else 6
@@ -126,8 +135,17 @@ if has_audio:
     d = np.diff(env)
     # Which cues to check: --sync, else film.cues.sync (names of lists or single times), else every list of
     # 3+ plain numbers (two-number lists are usually [start, end] windows, not sound onsets).
-    keys = opt('--sync').split(',') if opt('--sync') else cues.get('sync') or [k for k, val in cues.items() if k not in ('transitions', 'blur', 'whips', 'sync') and isinstance(val, list) and len(val) >= 3 and all(isinstance(e, (int, float)) for e in val)]
+    if opt('--sync'):
+        keys = opt('--sync').split(',')
+    elif 'sync' in cues:
+        keys = cues['sync'] if isinstance(cues['sync'], list) else [cues['sync']]
+    else:
+        keys = [k for k, val in cues.items() if k not in ('transitions', 'blur', 'whips', 'sync') and isinstance(val, list) and len(val) >= 3 and all(isinstance(e, (int, float)) for e in val)]
+    keys = [k.strip() for k in keys]
     for key in keys:
+        if key not in cues:
+            print(f'sync    "{key}" is not in cues.json (typo?)')
+            continue
         val = cues.get(key, [])
         ts = sorted(e for e in (val if isinstance(val, list) else [val]) if isinstance(e, (int, float)))
         offs = []
@@ -157,6 +175,8 @@ if os.path.exists(text):
     r = run(sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'textcheck.py'), text, cues_path, '--venue', venue, text=True)
     out = r.stdout.strip()
     print(out)
+    if r.returncode and '[high]' not in out:
+        flag('high', 'textcheck.py failed, so on-screen text was not checked: ' + (r.stderr.strip().splitlines() or ['?'])[-1][:200])
     for line in out.splitlines():
         if '[high]' in line:
             problems.append(('high', line))

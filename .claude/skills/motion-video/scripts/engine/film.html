@@ -31,11 +31,11 @@ const {clamp, lerp, prog, bell, E, hash, rgba, mix, glow, add, sim, cam, rrect, 
 const C = {bg:'#0a0d18', surface:'#11162a', line:'#262f4d', fg:'#e8ebf5', muted:'#9aa3bf', faint:'#6a7393',
   accent:'#3d9bff', warm:'#ffb02e', good:'#7bd86f', gold:'#f2d36b'};
 Object.assign(T, {DISP:'"Spectral", Georgia, serif', BODY:'"IBM Plex Sans", system-ui, sans-serif', MONO:'"IBM Plex Mono", ui-monospace, monospace', fg:C.fg, muted:C.muted, faint:C.faint});
-const W = 1920, H = 1080;
-const film = Film.create({W, H, FPS:60, DUR:9, bg:C.bg});
+const W = 1920, H = 1080, DUR = 9;   // set the length once; every time below comes from DUR or TM
+const film = Film.create({W, H, FPS:60, DUR, bg:C.bg});
 
 /* 2. Master timing table: every scene boundary and beat lives here, so retiming is one edit. */
-const TM = {lightOn:.1, titleOut:2.5, whip:[2.75,3.2], bars0:3.45, bars1:4.5, callout:4.5, flash:6.1, fin:6.15};
+const TM = {lightOn:.1, titleOut:2.5, whip:[2.75,3.2], bars0:3.45, bars1:4.5, callout:4.5, flash:6.1, fin:6.15, url:6.85};
 film.blur = [[TM.whip[0], TM.whip[1], 12]];   // more motion-blur sub-frames during the fast pan
 
 /* 3. Precomputed state. Simulations run once at load; draw functions only sample them. */
@@ -73,7 +73,7 @@ film.scene(0, 3.25, (ctx, t) => {
 film.scene(TM.whip[0], TM.flash + .3, (ctx, t) => {
   const wp = prog(t, ...TM.whip), ox = W * (1 - E.inOutCubic(wp));     // enters from the right, same easing
   ctx.globalAlpha = E.outCubic(wp) * (1 - prog(t, TM.flash, TM.flash + .1)); ctx.translate(ox, 0);
-  T.eyebrow(ctx, [{s:'2019–2024', c:C.accent}, {s:' · PLACEHOLDER DATA', c:C.muted}], 140, 130, t, TM.whip[0] + .2);
+  T.eyebrow(ctx, [{s:'2019–2024', c:C.accent}, {s:' · PLACEHOLDER DATA', c:C.muted}], 140, 130, t, TM.whip[0] + .3);   // after the outgoing headline has left (it exits until ~2.96 s)
   T.line(ctx, [{s:'Numbers that ', f:`300 66px ${T.DISP}`, c:C.fg}, {s:'climb.', f:`italic 300 66px ${T.DISP}`, c:C.warm, glow:[C.warm,.45,26]}], 136, 210, t, {t0:TM.whip[0] + .3, st:.06});
   ctx.strokeStyle = C.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(BX0-20, BY); ctx.lineTo(BX1, BY); ctx.stroke();
   // The counter's value comes from the frame time: computed from t, the motion-blur sub-frames would
@@ -95,15 +95,15 @@ film.scene(TM.whip[0], TM.flash + .3, (ctx, t) => {
   T.callout(ctx, lx, BY - BH - 4, 1380, 300, prog(t, TM.callout, TM.callout + .6), 'LARGEST JUMP', 'why it matters', C.warm, {left:true});   // sharp from 5.1 s, held to the flash at 6.1 s
 });
 
-film.scene(TM.flash - .12, 9, (ctx, t) => {
+film.scene(TM.flash - .12, DUR, (ctx, t) => {
   ctx.globalAlpha = E.inOutCubic(prog(t, TM.flash - .12, TM.flash)); ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);   // opaque by the bloom's peak
   add(ctx, () => { glow(ctx, 1640, 520, 520, C.accent, .2, .5); glow(ctx, 1640, 520, 12, '#ffffff', .9) });
-  const push = 1 + .02*E.outCubic(prog(t, TM.fin, 9)); ctx.translate(140, 600); ctx.scale(push, push); ctx.translate(-140, -600);   // slow push-in on the end card
+  const push = 1 + .02*E.outCubic(prog(t, TM.fin, DUR)); ctx.translate(140, 600); ctx.scale(push, push); ctx.translate(-140, -600);   // slow push-in on the end card
   T.eyebrow(ctx, [{s:'YOUR SOURCE · 2026', c:C.gold}], 140, 330, t, TM.fin + .12, {size:22, cps:.012});
   T.line(ctx, [{s:'Your ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'title,', f:`italic 300 112px ${T.DISP}`, c:C.good}], 134, 470, t, {t0:TM.fin + .15, st:.07, rise:44, blur:18});
   T.line(ctx, [{s:'on the ', f:`300 112px ${T.DISP}`, c:C.fg}, {s:'end card.', f:`italic 300 112px ${T.DISP}`, c:C.accent}], 134, 592, t, {t0:TM.fin + .3, st:.07, rise:44, blur:18});
   const dl = E.inOutCubic(prog(t, TM.fin + .6, TM.fin + 1.0)); ctx.fillStyle = rgba(C.gold, .8); ctx.fillRect(140, 768, 1640*dl, 1.5);
-  const uq = E.outCubic(prog(t, TM.fin + .7, TM.fin + 1.1));   // every end-card element is complete by DUR − 1.6 s, so the finished card holds
+  const uq = E.outCubic(prog(t, TM.url, TM.url + .4));   // every end-card element is complete by DUR − 1.6 s, so the finished card holds
   if (uq > 0) { T.label(ctx, 'example.org/your-link', 1732, 846, `600 36px ${T.BODY}`, C.fg, uq, 'right'); T.arrow(ctx, 1742, 846, 38, 36, rgba(C.accent, uq)); }
 });
 
@@ -116,7 +116,8 @@ film.overlay((ctx, t) => {
 });
 
 /* 6. Cues for the score: every audible event, in film seconds. score.py reads these from cues.json. */
-film.cues = {lightOn:TM.lightOn, titleOut:TM.titleOut, whips:[TM.whip], pops:DATA.map((_, i) => barT(i)), callout:TM.callout, flash:TM.flash, fin:TM.fin, url:TM.fin + .7,
+film.cues = {lightOn:TM.lightOn, titleOut:TM.titleOut, whips:[TM.whip], pops:DATA.map((_, i) => barT(i)), callout:TM.callout, flash:TM.flash, fin:TM.fin, url:TM.url,
+  popVals:DATA.map(d => d[1]),                              // values, so the score's pitch can follow the data
   transitions:[TM.whip, [TM.flash - .15, TM.flash + .3]],   // tools/check.py samples extra frames inside these windows
   sync:['pops']};                                            // cue lists tools/check.py checks for audio sync
 

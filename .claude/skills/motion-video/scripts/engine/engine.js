@@ -47,7 +47,8 @@
   // from frameT(t), or the sub-frames average into ghosted, overlapping glyphs.
   const frameT = t => (window.T && T._frameT != null ? T._frameT : t);
   // Binary-search the time at which a monotonic function f(t) reaches value v (e.g. when a playhead passes an item).
-  function solveTime(f, v, a, b) { for (let k = 0; k < 40; k++) { const m = (a + b) / 2; if (f(m) < v) a = m; else b = m; } return b; }
+  // Works for increasing and decreasing f.
+  function solveTime(f, v, a, b) { const up = f(b) >= f(a); for (let k = 0; k < 40; k++) { const m = (a + b) / 2; if ((f(m) < v) === up) a = m; else b = m; } return b; }
 
   /* ------------------------------------------------------------------ colour */
   const _rgb = {};
@@ -126,7 +127,7 @@
   //     which reads as a camera flash rather than a grey fade.
   //   o.strength (0–1, default .9) scales the peak.
   function flash(ctx, t, at, x, y, o = {}) {
-    const W = ctx.canvas.width, fps = o.fps || 60, c = o.color || '#f2d36b', k = o.strength ?? .9;
+    const W = ctx.canvas.width, fps = o.fps || (window.FILM && FILM.FPS) || 60, c = o.color || '#f2d36b', k = o.strength ?? .9;
     if (o.mode === 'whiteout') {
       const hold = 2 / fps, a = t < at ? E.inQuad(prog(t, at - .1, at)) : t < at + hold ? 1 : 1 - E.outExpo(prog(t, at + hold, at + hold + .16));
       if (a > .003 && t > at - .1 && t < at + hold + .16) { ctx.save(); ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, ctx.canvas.height); ctx.restore(); }
@@ -274,6 +275,7 @@
   window.Film = {
     create(cfg) {
       const film = Object.assign({ W: 1920, H: 1080, FPS: 60, DUR: 10, bg: '#0a0d18', grain: .09, vignette: .5, fadeIn: .35 }, cfg);
+      if (film.W % 2 || film.H % 2) throw new Error(`W and H must be even (H.264 with yuv420p needs it); got ${film.W}x${film.H}`);
       const scenes = [], overlays = [];
       film.cues = {};
       film.scene = (from, to, draw) => { scenes.push({ from, to, draw }); return film; };
@@ -317,7 +319,14 @@
       film.drawAt = t => { T._frameT = t; drawScene(out, t); T._frameT = null; post(out, Math.floor(t * film.FPS)); };
 
       film.start = fontSpecs => {
-        film.ready = (async () => { await Promise.all((fontSpecs || []).map(s => document.fonts.load(s, 'Aa1’–·'))); await document.fonts.ready; })();
+        film.ready = (async () => {
+          await Promise.all((fontSpecs || []).map(s => document.fonts.load(s, 'Aa1’–·'))); await document.fonts.ready;
+          // A missing fonts.css or a mistyped family silently falls back to another face: say so.
+          const fams = [...new Set((fontSpecs || []).map(s => (s.match(/"([^"]+)"/) || [])[1]).filter(Boolean))];
+          const ok = new Set([...document.fonts].filter(f => f.status === 'loaded').map(f => f.family.replace(/["']/g, '')));
+          const miss = fams.filter(f => !ok.has(f));
+          if (miss.length) console.error('Fonts not loaded, a fallback face is drawing: ' + miss.join(', ') + '. Run fetch_fonts.py into video/fonts.');
+        })();
         window.FILM = { W: film.W, H: film.H, FPS: film.FPS, DUR: film.DUR, renderFrame: film.renderFrame, drawAt: film.drawAt, text: () => film.lastText || [],
           get CUES() { return Object.assign({ dur: film.DUR, fps: film.FPS, W: film.W, H: film.H, blur: film.blur }, film.cues); }, ready: film.ready };
         document.documentElement.style.setProperty('--ar', film.W / film.H);   // preview shell follows the film's aspect ratio

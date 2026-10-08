@@ -1,8 +1,11 @@
 // Render chosen moments as JPEG stills and an optional contact sheet, for the review loop.
-// usage: node tools/stills.mjs [--film film.html] [--out stills] --times 0.5,1.2,2.6 | --every 0.5
-//                              [--sheet sheet.jpg] [--sub 1] [--crop x,y,w,h]
-//   --crop  save only this region of each frame, scaled up to 1280 px wide: use it to check small
-//           labels, thin lines and motion-blur copies that a contact-sheet thumbnail hides.
+// usage: node tools/stills.mjs [--film film.html] [--out stills] --times 0.5,1.2,2.6 | --every 0.5 | --transitions
+//                              [--sheet sheet.jpg] [--sub N] [--crop x,y,w,h]
+//   --transitions  3 moments (20/50/80%) inside every film.cues.transitions window
+//   --sub          motion-blur sub-frames; default 1 (no blur) for --every, 4 (like the final build,
+//                  film.blur windows included) for --times, --transitions and --crop
+//   --crop         save only this region of each frame, scaled up to 1280 px wide: use it to check small
+//                  labels, thin lines and motion-blur copies that a contact-sheet thumbnail hides.
 // Contact-sheet cells follow the film's aspect ratio. Exits non-zero if the film throws.
 import fs from 'fs';
 import path from 'path';
@@ -12,15 +15,20 @@ import { launch, openFilm, withTimeout } from '../render.mjs';
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const here = path.dirname(fileURLToPath(import.meta.url));
 const film = path.resolve(arg('film', path.join(here, '..', 'film.html')));
-const out = path.resolve(arg('out', 'stills')), sheet = arg('sheet', null), sub = +arg('sub', 1);
+const out = path.resolve(arg('out', 'stills')), sheet = arg('sheet', null);
 const crop = arg('crop', null)?.split(',').map(Number) || null;
+const sub = +arg('sub', (arg('times', null) || crop || process.argv.includes('--transitions')) ? 4 : 1);
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await launch();
 const errors = [];
 const page = await openFilm(browser, film, errors);
-const { DUR, FPS, W, H } = await page.evaluate(() => ({ DUR: window.FILM.DUR, FPS: window.FILM.FPS, W: window.FILM.W, H: window.FILM.H }));
+const { DUR, FPS, W, H, CUES } = await page.evaluate(() => ({ DUR: window.FILM.DUR, FPS: window.FILM.FPS, W: window.FILM.W, H: window.FILM.H, CUES: window.FILM.CUES }));
 let times = arg('times', null)?.split(',').map(Number);
+if (!times && process.argv.includes('--transitions')) {
+  times = (CUES.transitions || []).flatMap(([a, b]) => [.2, .5, .8].map(q => +(a + (b - a) * q).toFixed(3)));
+  if (!times.length) { console.error('no film.cues.transitions windows to sample'); process.exit(1); }
+}
 if (!times) { const every = +arg('every', 1); times = []; for (let t = every / 2; t < DUR; t += every) times.push(+t.toFixed(3)); }
 
 const [cx, cy, cwid, chei] = crop || [0, 0, W, H];
@@ -50,3 +58,4 @@ if (sheet) {
 console.log(`${times.length} stills → ${out}`);
 if (errors.length) console.log('console errors:\n' + [...new Set(errors)].slice(0, 10).join('\n'));
 await browser.close();
+process.exit(0);

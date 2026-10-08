@@ -14,6 +14,13 @@
       "prompt": "Turn the Wikipedia article on the Voyager 1 probe (https://en.wikipedia.org/wiki/Voyager_1) into a 10-second vertical (9:16) teaser for Instagram Reels, with sound. Skip the storyboard check-in, I trust you.",
       "expected_output": "A 10 s 1080x1920 MP4 with sound; facts traceable to the article; layout designed for vertical with text clear of app UI zones; end card.",
       "files": []
+    },
+    {
+      "id": 3,
+      "name": "cycling-data-teaser",
+      "prompt": "Make a 20-second 16:9 motion graphics teaser, with sound, for the open bicycle counter data that Paris publishes (comptage vélo). Show how cycling has grown and the busiest counters. It will be posted on our team's LinkedIn.",
+      "expected_output": "A 20 s 1920x1080 MP4 with sound built from real aggregated data (data/prepare.py + data.js), the dataset, period and licence credited, no invented numbers, a social-feed venue (text sized for phones), data scenes with holds on the key values, and checks passing.",
+      "files": []
     }
   ]
 }
